@@ -34,6 +34,7 @@ class EconomyConfig(TypedDict):
 class ServerConfig(TypedDict):
     """TypedDict for the 'server_configs' table."""
     guild_id: int                  # Discord guild (server) ID.
+    notes: Optional[str]           # For me to remember which server is which, 9/10 times holds the server name
     prefix: str                    # Bot's command prefix for this guild.
     embed_color: str               # Default embed color (hex string).
     allowed_channels: List[int]    # List of channel IDs where the bot is allowed to respond.
@@ -47,6 +48,7 @@ class EconomyData(TypedDict):
     balance: int                   # User's current balance.
     last_work: Optional[str]       # Timestamp of the last 'work' command (ISO format string).
     last_steal: Optional[str]      # Timestamp of the last 'steal' command (ISO format string).
+    participant: bool              # If User has participated in the economy (used the bot)
 
 class EconomyLog(TypedDict):
     """TypedDict for the 'economy_logs' table, tracking all economy transactions."""
@@ -128,6 +130,7 @@ async def get_server_config(guild_id: int) -> ServerConfig:
         # If no configuration is found, create a new default configuration.
         new_config: ServerConfig = {
             "guild_id": guild_id,
+            "notes": None,
             "prefix": "-",
             "embed_color": "#0000FF",
             "allowed_channels": [], # Empty list means all channels are allowed by default.
@@ -179,7 +182,8 @@ async def get_user_economy_data(guild_id: int, user_id: int) -> EconomyData:
         'user_id': user_id,
         'balance': starting_balance,
         'last_work': None,
-        'last_steal': None
+        'last_steal': None,
+        'participant': False
     }
     # Insert the new user economy data into the 'economy' table.
     supabase.table('economy').insert(dict(new_user_data)).execute()
@@ -218,7 +222,7 @@ async def update_user_balance(guild_id: int, user_id: int, change: int, action: 
     current_balance = user_data.get('balance', 0)
     new_balance = current_balance + change
 
-    await update_user_economy(guild_id, user_id, {'balance': new_balance}) # Update balance in 'economy' table.
+    await update_user_economy(guild_id, user_id, {'balance': new_balance, 'participant': True}) # Update balance in 'economy' table.
     # Log the transaction details.
     await log_economy_action(guild_id, user_id, action, change, type, target_user_id)
     return new_balance

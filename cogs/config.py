@@ -3,6 +3,7 @@ from discord.ext import commands
 from utils.supabase_client import get_server_config, update_server_config
 from utils.helpers import send_embed, get_embed_color
 from typing import Optional, List, Any
+# FIXME: This Command sucks, Refactor
 
 def get_allowed_str(bot, channels: List[Any]):
     channels_str = ""
@@ -32,6 +33,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         This provides an overview of the bot's current configuration.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
 
         # Fetch the current server configuration and extract economy settings.
@@ -93,6 +95,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         If no subcommand is given, it shows current general settings.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         general_channels = config.get("allowed_channels", [])
@@ -109,6 +112,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `new_prefix`: Optional. The new prefix to set. If None, shows current prefix.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         if new_prefix is None:
             # If no new prefix is provided, display the current one.
@@ -128,6 +132,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `new_color`: Optional. The new hexadecimal color string. If None, shows current color.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         if new_color is None:
             config = await get_server_config(ctx.guild.id)
@@ -144,6 +149,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         If no subcommand is given, lists currently allowed channels.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         channels = config.get("allowed_channels", [])
@@ -168,6 +174,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `channel`: The Discord text channel to toggle (automatically converted by Discord.py).
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         channels = config.get("allowed_channels", [])
@@ -193,6 +200,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         Allows the bot to operate in all channels by setting the allowed_channels list to empty.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         await update_server_config(ctx.guild.id, allowed_channels=[])
         await send_embed(ctx, "All channels are now allowed.")
@@ -204,6 +212,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         Disallows the bot from operating in any channel by setting allowed_channels to [-1].
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         await update_server_config(ctx.guild.id, allowed_channels=[-1])
         await send_embed(ctx, "All channels are now disallowed.")
@@ -218,6 +227,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         If no subcommand is given, shows current currency settings.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         eco = config['economy']
@@ -232,6 +242,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `new_name`: Optional. The new name for the currency. If None, shows current name.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         if new_name is None:
             config = await get_server_config(ctx.guild.id)
@@ -250,6 +261,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `new_symbol`: Optional. The new symbol for the currency. If None, shows current symbol.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         if new_symbol is None:
             config = await get_server_config(ctx.guild.id)
@@ -267,6 +279,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `amount`: Optional. The new starting balance. If None, shows current starting balance.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         symbol = config['economy']['currency_symbol']
@@ -285,6 +298,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         If no subcommand is given, shows current work settings.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         eco = config['economy']
@@ -300,6 +314,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `hours`: Optional. The new cooldown in hours. If None, shows current cooldown.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         if hours is None:
             config = await get_server_config(ctx.guild.id)
@@ -317,6 +332,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `amount`: Optional. The new minimum amount. If None, shows current minimum.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         symbol = config['economy']['currency_symbol']
@@ -335,6 +351,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `amount`: Optional. The new maximum amount. If None, shows current maximum.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         symbol = config['economy']['currency_symbol']
@@ -353,6 +370,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         If no subcommand is given, shows current steal settings.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         eco = config['economy']
@@ -368,6 +386,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `hours`: Optional. The new cooldown in hours. If None, shows current cooldown.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         if hours is None:
             config = await get_server_config(ctx.guild.id)
@@ -386,6 +405,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `chance`: Optional. The new chance as a decimal. If None, shows current chance.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         if chance is None:
             config = await get_server_config(ctx.guild.id)
@@ -403,6 +423,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `amount`: Optional. The new penalty amount. If None, shows current penalty.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         symbol = config['economy']['currency_symbol']
@@ -421,6 +442,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `percentage`: Optional. The new maximum percentage as a decimal. If None, shows current max.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         if percentage is None:
             config = await get_server_config(ctx.guild.id)
@@ -438,6 +460,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         If no subcommand is given, shows current money drop settings.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         drop = config['economy'].get('money_drop', {})
@@ -465,6 +488,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `toggle`: Optional. Boolean value to enable or disable. If None, shows current status.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         if toggle is None:
@@ -484,6 +508,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `chance`: Optional. The new chance as a decimal (e.g., 0.05 for 5%). If None, shows current chance.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         if chance is None:
@@ -503,6 +528,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `amount`: Optional. The new minimum amount. If None, shows current minimum.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         symbol = config['economy']['currency_symbol']
@@ -523,6 +549,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `amount`: Optional. The new maximum amount. If None, shows current maximum.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         symbol = config['economy']['currency_symbol']
@@ -542,6 +569,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         If no subcommand is given, lists currently allowed channels for money drops.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         channels = config["economy"]["money_drop"].get("allowed_channels", [])
@@ -558,6 +586,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         - `channel`: The Discord text channel to toggle.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         money_drop_config = config['economy'].get('money_drop', {})
@@ -584,6 +613,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         Allows money drops in all channels by setting the allowed_channels list to empty.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         money_drop_config = config['economy'].get('money_drop', {})
@@ -598,6 +628,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
         Disallows money drops in all channels by setting allowed_channels to [-1].
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         config = await get_server_config(ctx.guild.id)
         money_drop_config = config['economy'].get('money_drop', {})

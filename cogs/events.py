@@ -50,7 +50,7 @@ class DropView(discord.ui.View):
         Called when the view times out (i.e., no one clicks the button within the timeout period).
         Updates the message to indicate the drop went unclaimed and disables the button.
         """
-        if self.message:
+        if self.message and not self.claimed:
             for item in self.children:
                 if isinstance(item, discord.ui.Button):
                     item.label = "Unclaimed"

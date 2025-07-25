@@ -13,3 +13,6 @@ if __name__ == "__main__":
     # This is the entry point for the entire bot application.
     asyncio.run(main())
 
+    # TODO: New game to add: Roulette?
+    # TODO: Chat Revive
+    # TODO: Family Tree

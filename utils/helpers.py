@@ -5,7 +5,7 @@ from typing import Optional
 
 DEFAULT_EMBED_COLOR = discord.Color.blue()
 
-async def get_embed_color(guild_id: int) -> discord.Color:
+async def get_embed_color(guild_id: Optional[int] = None) -> discord.Color:
     """
     Gets the configured embed color for a given guild from the Supabase database.
     Falls back to a default color if no custom color is set or if the set color is invalid.
@@ -14,10 +14,14 @@ async def get_embed_color(guild_id: int) -> discord.Color:
     Returns:
     - A `discord.Color` object.
     """
-    # Fetch server configuration. `get_server_config` handles defaults if no config exists.
-    server_config = await get_server_config(guild_id)
-    # Get the `embed_color` from the config, defaulting to "#0000FF" (blue) if not set.
-    hex_color: str = server_config.get('embed_color', '#0000FF')
+    if guild_id:
+        # Fetch server configuration. `get_server_config` handles defaults if no config exists.
+        server_config = await get_server_config(guild_id)
+        # Get the `embed_color` from the config, defaulting to "#0000FF" (blue) if not set.
+        hex_color: str = server_config.get('embed_color', '#0000FF')
+    else:
+        hex_color = '#0000FF'
+
     try:
         # Convert hexadecimal string (e.g., "#RRGGBB") to an integer suitable for `discord.Color`.
         # `lstrip('#')` removes the '#' prefix, and `int(..., 16)` converts from base 16.
@@ -60,7 +64,8 @@ async def send_embed(ctx: commands.Context, description: str, title: Optional[st
     - `title`: Optional. The title of the embed.
     """
     if not ctx.guild:
-        return # Cannot send guild-specific embeds outside a guild.
+        await send_embed(ctx, "You must be in a server to use this command.")
+        return
 
     # Get the custom embed color for the guild.
     color = await get_embed_color(ctx.guild.id)

@@ -9,8 +9,110 @@ from utils.supabase_client import (
     get_server_config,
     supabase # Direct Supabase client instance, for raw queries.
 )
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Dict, Any
 from utils.helpers import send_embed, format_currency, get_embed_color
+
+# Number of entries per page in the leaderboard
+LEADERBOARD_ENTRIES_PER_PAGE = 10
+
+class LeaderboardView(discord.ui.View):
+    """
+    A Discord UI View for the paginated leaderboard, containing navigation buttons.
+    """
+    def __init__(self, ctx: commands.Context, all_entries: List[Dict[str, Any]], total_pages: int) -> None:
+        super().__init__(timeout=120.0)  # Timeout after 2 minutes of inactivity
+        self.ctx = ctx
+        self.all_entries = all_entries
+        self.total_pages = total_pages
+        self.current_page = 0
+        self.message: Optional[discord.Message] = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """
+        Ensures that only the command invoker can interact with the buttons.
+        """
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("This isn't your leaderboard!", ephemeral=True)
+            return False
+        return True
+
+    async def _update_leaderboard_embed(self) -> discord.Embed:
+        """
+        Helper to create and return the leaderboard embed for the current page.
+        Includes user avatars.
+        """
+        guild_id = self.ctx.guild.id # type: ignore
+        color = await get_embed_color(guild_id)
+        embed = discord.Embed(title=f"Leaderboard", color=color)
+
+        start_index = self.current_page * LEADERBOARD_ENTRIES_PER_PAGE
+        end_index = start_index + LEADERBOARD_ENTRIES_PER_PAGE
+        
+        # Determine the users to display on the current page
+        current_page_entries = self.all_entries[start_index:end_index]
+
+        # Add fields for each user on the current page
+        for i, entry in enumerate(current_page_entries):
+            global_rank = start_index + i + 1 # Calculate rank
+            user_id = entry['user_id']
+            balance_val = entry['balance']
+
+            try:
+                user = self.ctx.bot.get_user(user_id) or await self.ctx.bot.fetch_user(user_id)
+                user_name = user.display_name
+                # user_avatar_url = user.display_avatar.url # Removed: Not used for individual display
+            except discord.NotFound:
+                user_name = "Unknown User"
+                # user_avatar_url = "" # Removed: Not used for individual display
+
+            formatted_bal = await format_currency(guild_id, balance_val)
+            
+            embed.add_field(
+                name=f"{global_rank}. {user_name}",
+                value=f"{formatted_bal}",
+                inline=False
+            )
+            # if user_avatar_url:
+            #     embed.set_thumbnail(url=user_avatar_url) # Removed: Only allows one thumbnail per embed.
+
+
+        embed.set_footer(text=f"Requested by {self.ctx.author.display_name} | Page {self.current_page + 1}/{self.total_pages}")
+        return embed
+
+    async def _update_message(self) -> None:
+        """Updates the message with the new embed and view."""
+        if self.message:
+            embed = await self._update_leaderboard_embed()
+            await self.message.edit(embed=embed, view=self)
+
+    @discord.ui.button(label="⬅️ Left", style=discord.ButtonStyle.blurple)
+    async def left_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.current_page = (self.current_page - 1) % self.total_pages
+        await interaction.response.edit_message(embed=await self._update_leaderboard_embed(), view=self)
+
+    @discord.ui.button(label="Self", style=discord.ButtonStyle.grey)
+    async def self_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        user_id = self.ctx.author.id
+        # Find the user's rank
+        for i, entry in enumerate(self.all_entries):
+            if entry['user_id'] == user_id:
+                target_page = i // LEADERBOARD_ENTRIES_PER_PAGE
+                if self.current_page != target_page:
+                    self.current_page = target_page
+                    await interaction.response.edit_message(embed=await self._update_leaderboard_embed(), view=self)
+                else:
+                    await interaction.response.send_message("You are already on your page!", ephemeral=True)
+                return
+        await interaction.response.send_message("You are not currently on the leaderboard. Participate in the economy!", ephemeral=True)
+
+    @discord.ui.button(label="Right ➡️", style=discord.ButtonStyle.blurple)
+    async def right_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.current_page = (self.current_page + 1) % self.total_pages
+        await interaction.response.edit_message(embed=await self._update_leaderboard_embed(), view=self)
+
+    async def on_timeout(self) -> None:
+        if self.message:
+            await self.message.edit(view=None) # Remove buttons on timeout
 
 class Economy(commands.Cog):
     """
@@ -28,6 +130,7 @@ class Economy(commands.Cog):
         - `member`: Optional. The member whose balance to check. Defaults to the command invoker.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
 
         # If no member is specified, default to the command author.
@@ -43,38 +146,29 @@ class Economy(commands.Cog):
     @commands.command(name='leaderboard', aliases=['lb'])
     async def leaderboard(self, ctx: commands.Context) -> None:
         """
-        Shows the server's economy leaderboard, displaying the top 10 richest users.
+        Shows the server's economy leaderboard, displaying paginated results with profile pictures.
         """
-        # If you dont have an entry in the log, dont show up in the leaderboard
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
 
         # Query Supabase for top 10 users by balance in the current guild.
         # `.order('balance', desc=True)` sorts by balance in descending order.
-        # `.limit(10)` restricts the results to the top 10.
-        response = supabase.table('economy').select("user_id, balance").eq('guild_id', ctx.guild.id).order('balance', desc=True).limit(10).execute()
-        if not response.data:
-            # If no data is returned (no one has money yet), inform the user.
-            await send_embed(ctx, "No one has any money yet!")
+        # `.eq('participant', True)` restricts the results to people who have actually used the bot.
+        response = supabase.table('economy').select("user_id, balance").eq('guild_id', ctx.guild.id).eq('participant', True).order('balance', desc=True).execute()
+        all_entries = response.data
+
+        if not all_entries:
+            await send_embed(ctx, "No one has participated in the economy yet.")
             return
 
-        # Get the embed color from the server's configuration.
-        color = await get_embed_color(ctx.guild.id)
-        embed = discord.Embed(title="Leaderboard", color=color)
+        total_pages = (len(all_entries) + LEADERBOARD_ENTRIES_PER_PAGE - 1) // LEADERBOARD_ENTRIES_PER_PAGE
+        
+        # Initialize the view and send the first page
+        view = LeaderboardView(ctx, all_entries, total_pages)
+        initial_embed = await view._update_leaderboard_embed()
+        view.message = await ctx.send(embed=initial_embed, view=view)
 
-        # Iterate through the fetched data to populate the leaderboard embed.
-        for i, entry in enumerate(response.data):
-            try:
-                # Attempt to get the user object from bot's cache or fetch it from Discord.
-                user = self.bot.get_user(entry['user_id']) or await self.bot.fetch_user(entry['user_id'])
-                formatted_bal = await format_currency(ctx.guild.id, entry['balance'])
-                embed.add_field(name=f"{i+1}. {user.name}", value=f"{formatted_bal}", inline=False)
-            except discord.NotFound:
-                # If a user is not found (e.g., left the server), display as "Unknown User".
-                formatted_bal = await format_currency(ctx.guild.id, entry['balance'])
-                embed.add_field(name=f"{i+1}. Unknown User", value=f"{formatted_bal}", inline=False)
-
-        await ctx.send(embed=embed)
 
     @commands.command(name='work')
     async def work(self, ctx: commands.Context) -> None:
@@ -83,6 +177,7 @@ class Economy(commands.Cog):
         Includes a cooldown mechanism.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
         guild_id = ctx.guild.id
         user_id = ctx.author.id
@@ -123,6 +218,7 @@ class Economy(commands.Cog):
         - `member`: Optional. The target member to steal from. If None, a random non-bot member is chosen.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return
 
         # If no target member is specified, select a random non-bot member from the guild.
@@ -187,6 +283,9 @@ class Economy(commands.Cog):
             formatted_penalty = await format_currency(guild_id, penalty)
             await send_embed(ctx, f"You were caught! You paid a penalty of {formatted_penalty}.")
 
+    # TODO: Give Command
+    # TODO: Random Messages for Steal + Work
+    # TODO: Link to Tiktok to gain arrows from lives
 
 async def setup(bot: commands.Bot) -> None:
     """

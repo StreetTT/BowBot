@@ -45,15 +45,16 @@ class HelpCog(commands.Cog, name="Help"):
         - `command_or_cog_name`: Optional. The name of the command or cog to get help for.
                                  If None, lists all commands.
         """
-        if not ctx.guild:
-            return # Ensure command is used in a guild.
-
-        # Get the bot's prefix for the current guild.
-        prefix_list: Union[List[str], str] = await self.bot.get_prefix(ctx.message)
-        # Handle cases where prefix_list might be shorter than expected or not a list
-        prefix = prefix_list[2] if isinstance(prefix_list, list) and len(prefix_list) > 2 else (prefix_list[0] if isinstance(prefix_list, list) and len(prefix_list) > 0 else prefix_list)
-        prefix = cast(str, prefix)
-        color = await get_embed_color(ctx.guild.id)
+        if ctx.guild:
+            # Get the bot's prefix for the current guild.
+            prefix_list: Union[List[str], str] = await self.bot.get_prefix(ctx.message)
+            # Handle cases where prefix_list might be shorter than expected or not a list
+            prefix = prefix_list[2] if isinstance(prefix_list, list) and len(prefix_list) > 2 else (prefix_list[0] if isinstance(prefix_list, list) and len(prefix_list) > 0 else prefix_list)
+            prefix = cast(str, prefix)
+            color = await get_embed_color(ctx.guild.id)
+        else:
+            prefix = self.bot.user.mention # type: ignore
+            color = await get_embed_color()
 
         if command_or_cog_name is None:
             # --- Displaying General Help (All Commands) ---

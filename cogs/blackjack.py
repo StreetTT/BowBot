@@ -126,13 +126,14 @@ class Blackjack(commands.Cog):
         self.bot = bot
 
     @commands.command(name='blackjack', aliases=['bj'])
-    async def blackjack(self, ctx: commands.Context, bet: int) -> None:
+    async def blackjack(self, ctx: commands.Context, bet: int | str) -> None:
         """
         Starts a game of blackjack.
         Parameters:
         - `bet`: The amount of money the player wants to bet.
         """
         if not ctx.guild:
+            await send_embed(ctx, "You must be in a server to use this command.")
             return # Ensure command is used in a guild (server).
 
         user_id = ctx.author.id
@@ -150,6 +151,19 @@ class Blackjack(commands.Cog):
         # Fetch player's economy data.
         user_data = await get_user_economy_data(ctx.guild.id, user_id)
         balance = user_data.get('balance', 0)
+
+        # Determine bet amount
+        if isinstance(bet, str):
+            if bet.lower() in ("all", "max", "life savings"):
+                bet = balance
+            elif "%" in bet:
+                bet = int(balance * float(bet[:-1]) / 100)
+            else:
+                try:
+                    bet = int(bet)
+                except ValueError:
+                    await send_embed(ctx, "Bet must be a valid integer.")
+                    return
 
         # Validate the bet amount.
         if bet <= 0:
