@@ -14,7 +14,7 @@ class MoneyDropConfig(TypedDict):
     chance: float                  # Probability of a money drop occurring (e.g., 0.05 for 5%).
     min_amount: int                # Minimum money awarded per drop.
     max_amount: int                # Maximum money awarded per drop.
-    allowed_channels: List[int]    # List of channel IDs where the bot is allowed to respond.
+    allowed_channels: List[str]    # List of channel IDs where the bot is allowed to respond.
                                    # An empty list means all channels are allowed. [-1] means none are allowed.
 
 class EconomyConfig(TypedDict):
@@ -37,7 +37,7 @@ class ServerConfig(TypedDict):
     notes: Optional[str]           # For me to remember which server is which, 9/10 times holds the server name
     prefix: str                    # Bot's command prefix for this guild.
     embed_color: str               # Default embed color (hex string).
-    allowed_channels: List[int]    # List of channel IDs where the bot is allowed to respond.
+    allowed_channels: List[str]    # List of channel IDs where the bot is allowed to respond.
                                    # An empty list means all channels are allowed. [-1] means none are allowed.
     economy: EconomyConfig         # Nested dictionary for economy settings specific to this server.
 
@@ -83,8 +83,8 @@ DEFAULT_ECONOMY_CONFIG: EconomyConfig = {
         "enabled": False,
         "chance": 0.05, # 5% chance per message for a money drop.
         "min_amount": 50,
-        "max_amount": 500,
-        "allowed_channels": [-1]
+        "max_amount": 150,
+        "allowed_channels": ["-1"]
     }
 }
 

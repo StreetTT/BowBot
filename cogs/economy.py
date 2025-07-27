@@ -10,7 +10,7 @@ from utils.supabase_client import (
     supabase # Direct Supabase client instance, for raw queries.
 )
 from typing import Optional, List, Union, Dict, Any
-from utils.helpers import send_embed, format_currency, get_embed_color
+from utils.helpers import *
 
 # Number of entries per page in the leaderboard
 LEADERBOARD_ENTRIES_PER_PAGE = 10
@@ -39,9 +39,10 @@ class LeaderboardView(discord.ui.View):
     async def _update_leaderboard_embed(self) -> discord.Embed:
         """
         Helper to create and return the leaderboard embed for the current page.
-        Includes user avatars.
         """
-        guild_id = self.ctx.guild.id # type: ignore
+        assert self.ctx.guild is not None
+
+        guild_id = self.ctx.guild.id 
         color = await get_embed_color(guild_id)
         embed = discord.Embed(title=f"Leaderboard", color=color)
 
@@ -117,25 +118,33 @@ class LeaderboardView(discord.ui.View):
 class Economy(commands.Cog):
     """
     Commands for interacting with the server's economy system.
-    This cog handles user balances, a leaderboard, and minigames like work and steal.
     """
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
     @commands.command(name='balance', aliases=['bal'])
-    async def balance(self, ctx: commands.Context, member: Optional[Union[discord.Member, discord.User]] = None) -> None:
+    @guild_only()
+    @in_allowed_channels()
+    async def balance(self, ctx: commands.Context, member_str: Optional[Union[discord.Member, str]] = None) -> None:
         """
         Checks your or another user's balance.
         Parameters: 
         - `member`: Optional. The member whose balance to check. Defaults to the command invoker.
         """
-        if not ctx.guild:
-            await send_embed(ctx, "You must be in a server to use this command.")
-            return
+        assert ctx.guild is not None
+        member = ctx.author
+
 
         # If no member is specified, default to the command author.
-        member = member or ctx.author
-        
+        if member_str:
+            try:
+                member = await get_user_from_arg(member_str, ctx)
+            except Exception as e:
+                if not (str(e) == "Member not found."):
+                    raise  # re-raise unexpected exceptions
+                    
+
+
         # Fetch economy data for the specified user. `get_user_economy_data` usually creates data if none
         user_data = await get_user_economy_data(ctx.guild.id, member.id)
         balance_val = user_data.get('balance', 0)
@@ -144,13 +153,13 @@ class Economy(commands.Cog):
         await send_embed(ctx, f"**{member.display_name}**'s balance is {formatted_bal}.")
 
     @commands.command(name='leaderboard', aliases=['lb'])
+    @guild_only()
+    @in_allowed_channels()
     async def leaderboard(self, ctx: commands.Context) -> None:
         """
-        Shows the server's economy leaderboard, displaying paginated results with profile pictures.
+        Shows the server's economy leaderboard, displaying paginated results.
         """
-        if not ctx.guild:
-            await send_embed(ctx, "You must be in a server to use this command.")
-            return
+        assert ctx.guild is not None
 
         # Query Supabase for top 10 users by balance in the current guild.
         # `.order('balance', desc=True)` sorts by balance in descending order.
@@ -171,14 +180,14 @@ class Economy(commands.Cog):
 
 
     @commands.command(name='work')
+    @guild_only()
+    @in_allowed_channels()
     async def work(self, ctx: commands.Context) -> None:
         """
         Allows a user to 'work' to earn a random amount of money.
-        Includes a cooldown mechanism.
         """
-        if not ctx.guild:
-            await send_embed(ctx, "You must be in a server to use this command.")
-            return
+        assert ctx.guild is not None
+
         guild_id = ctx.guild.id
         user_id = ctx.author.id
         # Get server and economy specific configurations.
@@ -210,25 +219,24 @@ class Economy(commands.Cog):
         await send_embed(ctx, f"You worked hard and earned {formatted_earnings}!")
 
     @commands.command(name='steal')
-    async def steal(self, ctx: commands.Context, member: Optional[discord.Member] = None) -> None:
+    @guild_only()
+    @in_allowed_channels()
+    async def steal(self, ctx: commands.Context, member: Optional[Union[discord.Member, str]] = None) -> None:
         """
-        Attempt to steal money from another member. If no member is specified, a random user is chosen.
-        Includes cooldowns, chance, penalties, and maximum steal percentages.
+        Attempt to steal money from another member.
         Parameters:
         - `member`: Optional. The target member to steal from. If None, a random non-bot member is chosen.
         """
-        if not ctx.guild:
-            await send_embed(ctx, "You must be in a server to use this command.")
-            return
+        assert ctx.guild is not None
 
-        # If no target member is specified, select a random non-bot member from the guild.
-        if member is None:
-            # Filter out bots and the command author themselves.
-            members: List[discord.Member] = [m for m in ctx.guild.members if not m.bot and m.id != ctx.author.id]
-            if not members:
+        try:
+            member = await get_user_from_arg(member, ctx, True)
+        except Exception as e:
+            if str(e) == "No non-bot members in the guild.":
                 await send_embed(ctx, "There's no one to steal from!")
                 return
-            member = random.choice(members) # Pick a random member.
+            else:
+                raise  # re-raise unexpected exceptions
 
         guild_id = ctx.guild.id
         user_id = ctx.author.id
@@ -265,7 +273,7 @@ class Economy(commands.Cog):
             target_balance = target_data.get('balance', 0)
             if target_balance < 1:
                 # Cannot steal if target has no money.
-                await send_embed(ctx, f"**{member.display_name}** has no money to steal!")
+                await send_embed(ctx, f"**{member.mention}** has no money to steal!")
                 return
 
             # Calculate amount stolen: random between 1 and max percentage of target's balance.
@@ -275,7 +283,7 @@ class Economy(commands.Cog):
             await update_user_balance(guild_id, member.id, -amount_stolen, "stolen_from", "USER", user_id)
 
             formatted_stolen = await format_currency(guild_id, amount_stolen)
-            await send_embed(ctx, f"Success! You stole {formatted_stolen} from **{member.display_name}**.")
+            await send_embed(ctx, f"Success! You stole {formatted_stolen} from **{member.mention}**.")
         else:
             # Steal failed logic: apply penalty to the stealer.
             penalty = eco_config['steal_penalty']
@@ -283,7 +291,65 @@ class Economy(commands.Cog):
             formatted_penalty = await format_currency(guild_id, penalty)
             await send_embed(ctx, f"You were caught! You paid a penalty of {formatted_penalty}.")
 
-    # TODO: Give Command
+    @commands.command(name='give')
+    @guild_only()
+    @in_allowed_channels()
+    async def give(self, ctx: commands.Context, member: Optional[Union[discord.Member, str]] = None, *, amount: Optional[int] = None) -> None:
+        """
+        Attempt to give money to another member.
+        Parameters:
+        - `member`: Optional. The target member to give to. If None, a random non-bot member is chosen.
+        - `amount`: The amount to give to a person. If None, a random amount between 1 and 20 is given.
+        """
+        assert ctx.guild is not None
+
+        try:
+            member = await get_user_from_arg(member, ctx, True)
+        except Exception as e:
+            if str(e) == "No non-bot members in the guild.":
+                await send_embed(ctx, "There's no one to steal from!")
+                return
+            else:
+                raise  # re-raise unexpected exceptions
+
+        guild_id = ctx.guild.id
+        user_id = ctx.author.id
+
+        # Prevent giving to self.
+        if member.id == user_id:
+            await send_embed(ctx, "You can't give to yourself.")
+            return
+        # Prevent giving to bots.
+        if member.bot:
+            await send_embed(ctx, "You can't give from bots.")
+            return
+
+        user_data = await get_user_economy_data(guild_id, user_id)
+        user_balance = user_data.get('balance', 0)
+
+        # Determine Amount 
+        try:
+            amount_given = await amount_str_to_int(str(amount), user_balance, ctx)
+        except:
+            # Random between 1 and max percentage of target's balance.
+            amount_given = random.randint(1, min(20, user_balance))
+        
+        # Validate the final amount
+        if amount_given <= 0:
+            await send_embed(ctx, "Bet must be a positive amount.")
+            return
+        if amount_given > user_balance:
+            formatted_balance = await format_currency(ctx.guild.id, user_balance)
+            await send_embed(ctx, f"You don't have enough to bet that much. Your balance is {formatted_balance}.")
+            return
+        
+        await update_user_balance(guild_id, user_id, -amount_given, "give_success", "USER", member.id)
+        await update_user_balance(guild_id, member.id, amount_given, "given_to", "USER", user_id)
+
+        formatted_given = await format_currency(guild_id, amount_given)
+        await send_embed(ctx, f"Success! You gave {formatted_given} to **{member.mention}**.")
+
+
     # TODO: Random Messages for Steal + Work
     # TODO: Link to Tiktok to gain arrows from lives
 

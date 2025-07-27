@@ -1,7 +1,8 @@
 import discord
 from discord.ext import commands
 from utils.supabase_client import get_server_config
-from typing import Optional
+from typing import Optional, List, Union
+import random
 
 DEFAULT_EMBED_COLOR = discord.Color.blue()
 
@@ -63,14 +64,114 @@ async def send_embed(ctx: commands.Context, description: str, title: Optional[st
     - `description`: The main text content of the embed.
     - `title`: Optional. The title of the embed.
     """
-    if not ctx.guild:
-        await send_embed(ctx, "You must be in a server to use this command.")
-        return
-
+    
     # Get the custom embed color for the guild.
+    assert ctx.guild is not None
     color = await get_embed_color(ctx.guild.id)
     embed = discord.Embed(description=description, color=color)
     if title:
         embed.title = title
     # Send the embed message to the channel where the command was invoked.
     await ctx.send(embed=embed)
+
+async def get_user_from_arg(user_arg: Optional[Union[str, discord.Member]], ctx: commands.Context, random_if_invalid: bool = False):
+    assert ctx.guild is not None
+    
+    if user_arg is not None and isinstance(user_arg, str):
+        try:
+            user_arg = await commands.MemberConverter().convert(ctx, user_arg)
+        except commands.MemberNotFound:
+            user_arg = None
+
+    # If no target member is specified, select a random non-bot member from the guild.
+    if user_arg is None:
+        if not random_if_invalid:
+            raise Exception("Member not found.")
+        # Filter out bots and the command author themselves.
+        members: List[discord.Member] = [m for m in ctx.guild.members if not m.bot and m.id != ctx.author.id]
+        if not members:
+            raise Exception("No non-bot members in the guild.")
+        return random.choice(members) # Pick a random member.
+    return user_arg
+
+
+def guild_only():
+    """
+    A custom command check that ensures the command is used only within a guild.
+    If used in a DM, it sends an ephemeral message and prevents the command from running.
+    """
+    async def predicate(ctx):
+        if ctx.guild is None:
+            await ctx.author.send("This command can only be used in a server.")
+            return False
+        return True
+    return commands.check(predicate)
+
+async def channel_check(ctx: commands.Context, allowed_channels: List[str]):
+    # If allowed_channels is empty, all channels are allowed.
+    if not allowed_channels:
+        return True
+    
+    # If allowed_channels is ["-1"] or current channel ID isn't in the allowed list.
+    if allowed_channels == ["-1"] or str(ctx.channel.id) not in allowed_channels:
+        return False
+    
+    return True
+
+
+def in_allowed_channels():
+    """
+    A custom command check that ensures the command is used in a channel
+    allowed by the server's general configuration.
+    Requires the command to be used in a guild.
+    """
+    async def predicate(ctx: commands.Context):
+        assert ctx.guild is not None
+
+        server_config = await get_server_config(ctx.guild.id)
+        allowed_channels = server_config.get('allowed_channels', [])
+
+        return await channel_check(ctx, allowed_channels)
+    return commands.check(predicate)
+
+def in_moneydrop_channels():
+    """
+    A custom command check that ensures the command is used in a channel
+    allowed by the server's money drop configuration.
+    Requires the command to be used in a guild.
+    """
+    async def predicate(ctx: commands.Context):
+        assert ctx.guild is not None
+
+        server_config = await get_server_config(ctx.guild.id)
+        # Access money_drop config, defaulting to an empty dict if not present
+        money_drop_config = server_config.get('economy', {}).get('money_drop', {})
+        allowed_channels = money_drop_config.get('allowed_channels', [])
+
+        return await channel_check(ctx, allowed_channels)
+    
+    return commands.check(predicate)
+
+async def amount_str_to_int(amount_str: str , balance: int, ctx: commands.Context) -> int:
+    amount_str_lower = amount_str.lower()
+    if amount_str_lower in ("all", "max", "life savings"):
+        return balance
+    elif amount_str_lower.endswith("%"):
+        try:
+            percentage_value = float(amount_str_lower[:-1]) # Extract the number before '%'
+            if not (0 < percentage_value <= 100):
+                await send_embed(ctx, "Percentage bet must be between 1% and 100%.")
+                raise commands.BadArgument
+            amount_str_lower = int(balance * (percentage_value / 100))
+        except ValueError:
+            await send_embed(ctx, "Invalid percentage format. Use e.g., '50%'.")
+            raise commands.BadArgument
+    else:
+        try:
+            amount_str_lower = int(amount_str_lower)
+        except ValueError:
+            await send_embed(ctx, "Amount must be a valid number, 'all', or a percentage (e.g., '50%').")
+            raise commands.BadArgument
+    
+    # Ensure bet is an integer at this point
+    return int(amount_str_lower)

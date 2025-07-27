@@ -37,7 +37,7 @@ class DropView(discord.ui.View):
         button.disabled = True
         if interaction.message:
             self.message = interaction.message
-            await interaction.message.edit(view=self) # type: ignore
+            await interaction.message.edit(view=self)
 
         # Update the user's balance in the database.
         await update_user_balance(self.guild_id, interaction.user.id, self.amount, "money_drop_claim", "BOT")
@@ -68,12 +68,12 @@ class EventsCog(commands.Cog, name="Events"):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    def cog_unload(self) -> None:
-        """
-        Cleanup method called when the cog is unloaded.
-        Currently empty, but can be used for stopping tasks or closing resources.
-        """
-        pass # Placeholder for future cleanup tasks.
+    # def cog_unload(self) -> None:
+    #     """
+    #     Cleanup method called when the cog is unloaded.
+    #     Currently empty, but can be used for stopping tasks or closing resources.
+    #     """
+    #     pass # Placeholder for future cleanup tasks.
 
 async def setup(bot: commands.Bot) -> None:
     """

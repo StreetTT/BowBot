@@ -2,9 +2,9 @@ import discord
 from discord.ext import commands
 import random
 import asyncio
-from typing import Optional, List, Dict, Any, Union
-from utils.supabase_client import get_server_config, get_user_economy_data, update_user_balance
-from utils.helpers import send_embed, format_currency, get_embed_color
+from typing import Optional, List, Dict, Any, Union, Set
+from utils.supabase_client import get_user_economy_data, update_user_balance
+from utils.helpers import *
 
 class BlackjackGame:
     """
@@ -73,11 +73,13 @@ class BlackjackView(discord.ui.View):
     A Discord UI View for the Blackjack game, containing "Hit" and "Stand" buttons.
     Manages user interactions and ensures only the game's author can interact.
     """
-    def __init__(self, author: Union[discord.User, discord.Member]) -> None:
+    def __init__(self, author: Union[discord.User, discord.Member], active_games: Dict[int,Optional[discord.Message]]) -> None:
         super().__init__(timeout=60.0)
         self.author = author
         self.action: Optional[str] = None
         self.message: Optional[discord.Message] = None
+        self.active_games = active_games # Store the matrix
+        self.player_id = author.id
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """
@@ -112,10 +114,15 @@ class BlackjackView(discord.ui.View):
     async def on_timeout(self) -> None:
         """
         Called when the view times out (no interaction within the timeout period).
+        Removes the player from the active games set.
         """
         if self.message:
             # Edit the original message to remove the view (buttons).
-            await self.message.edit(view=None) #type: ignore
+            await self.message.edit(view=None)
+        # Remove the player from the active games set if the game times out
+        if self.player_id in self.active_games:
+            self.active_games.pop(self.player_id)
+
 
 class Blackjack(commands.Cog):
     """
@@ -124,72 +131,62 @@ class Blackjack(commands.Cog):
     """
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self.active_games: Dict[int, Optional[discord.Message]] = {} # Track active games by user ID
 
     @commands.command(name='blackjack', aliases=['bj'])
-    async def blackjack(self, ctx: commands.Context, bet: int | str) -> None:
+    @guild_only()
+    @in_allowed_channels()
+    async def blackjack(self, ctx: commands.Context, *, bet_str: str) -> None:
         """
         Starts a game of blackjack.
         Parameters:
-        - `bet`: The amount of money the player wants to bet.
+        - `bet`: The amount of money the player wants to bet (can be "all" or a percentage like "50%").
         """
-        if not ctx.guild:
-            await send_embed(ctx, "You must be in a server to use this command.")
-            return # Ensure command is used in a guild (server).
-
+        assert ctx.guild is not None
         user_id = ctx.author.id
-        # Check if the user has administrator permissions.
-        is_admin = ctx.author.guild_permissions.administrator # type: ignore
-        server_config = await get_server_config(ctx.guild.id)
-        # Retrieve allowed channels for bot commands from server configuration.
-        allowed_channels = server_config.get('allowed_channels', [])
 
-        # Check channel permissions if not an admin and allowed channels are configured.
-        if not is_admin and allowed_channels and ctx.channel.id not in allowed_channels:
-            await send_embed(ctx, "You can't play in this channel!")
+        # --- Prevent Concurrent Games ---
+        if user_id in self.active_games and self.active_games[user_id] is discord.Message:
+            await send_embed(ctx, f"You are already in a blackjack game! Please finish your [current game]({self.active_games[user_id].jump_url}) before starting another.") # type: ignore
             return
 
-        # Fetch player's economy data.
-        user_data = await get_user_economy_data(ctx.guild.id, user_id)
-        balance = user_data.get('balance', 0)
+        self.active_games.update({user_id:None}) # Add player to active games immediately
 
-        # Determine bet amount
-        if isinstance(bet, str):
-            if bet.lower() in ("all", "max", "life savings"):
-                bet = balance
-            elif "%" in bet:
-                bet = int(balance * float(bet[:-1]) / 100)
-            else:
-                try:
-                    bet = int(bet)
-                except ValueError:
-                    await send_embed(ctx, "Bet must be a valid integer.")
-                    return
+        try:
+            # Fetch player's economy data.
+            user_data = await get_user_economy_data(ctx.guild.id, user_id)
+            balance = user_data.get('balance', 0)
 
-        # Validate the bet amount.
-        if bet <= 0:
-            await send_embed(ctx, "Bet must be a positive amount.")
-            return
-        if bet > balance:
-            # Inform the user if they don't have enough money.
-            formatted_balance = await format_currency(ctx.guild.id, balance)
-            await send_embed(ctx, f"You don't have enough to bet that much. Your balance is {formatted_balance}.")
-            return
+            # Determine Bet Amount 
+            try:
+                bet = await amount_str_to_int(bet_str, balance, ctx)
+            except commands.BadArgument:
+                return # Exit if bad arg given
 
-        # Initialize a new blackjack game.
-        game = BlackjackGame(user_id, bet)
-        game.start_game()
+            # Validate the final bet amount
+            if bet <= 0:
+                await send_embed(ctx, "Bet must be a positive amount.")
+                return
+            if bet > balance:
+                formatted_balance = await format_currency(ctx.guild.id, balance)
+                await send_embed(ctx, f"You don't have enough to bet that much. Your balance is {formatted_balance}.")
+                return
 
-        game_message: Optional[discord.Message] = None # Stores the main game message.
+            # Initialize a new blackjack game.
+            game = BlackjackGame(user_id, bet)
+            game.start_game()
 
-        async def update_game_embed(game_over: bool = False, view: Optional[discord.ui.View] = None) -> Optional[discord.Message]:
-            """
-            Helper function to update the game embed display.
-            Shows player and dealer hands, and hides dealer's second card if game is not over.
-            """
-            nonlocal game_message # Allow modification of `game_message` from outer scope.
-            if ctx.guild:
-                color = await get_embed_color(ctx.guild.id) # Get embed color from server config.
-                embed = discord.Embed(title="Blackjack", color=color)
+            game_message: Optional[discord.Message] = None
+
+            async def update_game_embed(game_over: bool = False, view: Optional[discord.ui.View] = None) -> Optional[discord.Message]:
+                """
+                Helper function to update the game embed display.
+                Shows player and dealer hands, and hides dealer's second card if game is not over.
+                """
+                assert ctx.guild is not None
+                nonlocal game_message # Allow modification of `game_message` from outer scope.
+                color = await get_embed_color(ctx.guild.id)
+                embed = discord.Embed(title=f"Blackjack - Betting {await format_currency(ctx.guild.id, bet)}", color=color)
 
                 # Format player's hand for display.
                 player_hand_str = " ".join([f"{c['rank']}{c['suit']}" for c in game.player_hand])
@@ -210,102 +207,109 @@ class Blackjack(commands.Cog):
                     await game_message.edit(embed=embed, view=view)
                     return game_message
                 else:
-                    game_message = await ctx.send(embed=embed, view=view) # type: ignore
-                    return game_message # type: ignore
+                    game_message = await ctx.send(embed=embed, view=view)  # type: ignore
+                    return game_message
 
-        # Check for immediate blackjack (player gets 21 on first two cards).
-        if game.get_hand_value(game.player_hand) == 21:
-            winnings = int(bet * 1.5) # Blackjack usually pays 1.5x the bet.
-            await update_user_balance(ctx.guild.id, user_id, winnings, "blackjack_win", "BOT")
-            await update_game_embed(game_over=True, view=None) # Show final hands.
-            formatted_winnings = await format_currency(ctx.guild.id, winnings)
-            await send_embed(ctx, f"Blackjack! You win {formatted_winnings}!")
-            return
-
-        # Main game loop.
-        while True:
-            view = BlackjackView(ctx.author)
-            # Attach the game message to the view for timeout handling.
-            view.message = await update_game_embed(view=view)
-
-            if not view.message:
-                raise commands.CommandError(
-                    "Failed to update the game embed. The original message may have been deleted, or I might have lost permissions to edit it."
-                )
-            # Create tasks to wait for either a button interaction or a chat message ('h' or 's').
-            message_waiter = asyncio.create_task(
-                self.bot.wait_for(
-                    'message',
-                    # Check if message is from the correct author, in the correct channel, and is 'h' or 's'.
-                    check=lambda m: m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ['h', 's']
-                )
-            )
-            view_waiter = asyncio.create_task(view.wait()) # Wait for a button press.
-
-            # Wait for either the message or the button press to complete.
-            done, pending = await asyncio.wait(
-                [message_waiter, view_waiter],
-                return_when=asyncio.FIRST_COMPLETED # Return as soon as one task finishes.
-            )
-
-            # Cancel any pending tasks to clean up resources.
-            for future in pending:
-                future.cancel()
-
-            action: Optional[str] = None
-            result: Union[discord.Message, Any] = done.pop().result() # Get the result of the completed task.
-
-            if isinstance(result, discord.Message): # If a message was sent, determine action based on its content.
-                action = 'hit' if result.content.lower() == 'h' else 'stand'
-                try:
-                    await result.delete() # Attempt to delete the command message for cleanliness.
-                except (discord.Forbidden, discord.NotFound):
-                    pass
-            else: # If a button was pressed, get the action from the view.
-                action = view.action
-            
-            # Remove buttons from the message after an action or timeout.
-            if game_message:
-                await game_message.edit(view=None)
-
-            if action == "hit":
-                game.player_hand.append(game.deal_card()) # Deal a new card to the player.
-                if game.get_hand_value(game.player_hand) > 21: # Player busts (goes over 21).
-                    await update_user_balance(ctx.guild.id, user_id, -bet, "blackjack_loss", "BOT") # Deduct bet.
-                    await update_game_embed(game_over=True, view=None) # Show final hands.
-                    formatted_bet = await format_currency(ctx.guild.id, bet)
-                    await send_embed(ctx, f"Bust! You lose {formatted_bet}.")
-                    return
-                continue
-
-            elif action == "stand":
-                # Player stands, now dealer plays.
-                while game.get_hand_value(game.dealer_hand) < 17:
-                    game.dealer_hand.append(game.deal_card()) # Dealer hits until 17 or more.
-
+            # Check for immediate blackjack (player gets 21 on first two cards).
+            if game.get_hand_value(game.player_hand) == 21:
+                winnings = int(bet * 1.5) # Blackjack usually pays 1.5x the bet.
+                await update_user_balance(ctx.guild.id, user_id, winnings, "blackjack_win", "BOT")
                 await update_game_embed(game_over=True, view=None) # Show final hands.
-                player_value = game.get_hand_value(game.player_hand)
-                dealer_value = game.get_hand_value(game.dealer_hand)
-                formatted_bet = await format_currency(ctx.guild.id, bet)
+                formatted_winnings = await format_currency(ctx.guild.id, winnings)
+                await send_embed(ctx, f"Blackjack! You win {formatted_winnings}!")
+                return # Game ends
 
-                # Determine the winner.
-                if dealer_value > 21 or player_value > dealer_value:
-                    # Player wins if dealer busts or player has higher score.
-                    await update_user_balance(ctx.guild.id, user_id, bet, "blackjack_win", "BOT") # Player wins bet.
-                    await send_embed(ctx, f"You win {formatted_bet}!")
-                elif player_value < dealer_value:
-                    # Player loses if dealer has higher score.
-                    await update_user_balance(ctx.guild.id, user_id, -bet, "blackjack_loss", "BOT") # Player loses bet.
-                    await send_embed(ctx, f"You lose {formatted_bet}.")
-                else:
-                    # It's a push (tie).
-                    await send_embed(ctx, "It's a push! Your bet is returned.")
-                return
+            # Main game loop.
+            while True:
+                # Pass the active_games set to the view for timeout cleanup
+                view = BlackjackView(ctx.author, self.active_games)
+                # Attach the game message to the view for timeout handling and redirection
+                view.message = await update_game_embed(view=view)
+                self.active_games[ctx.author.id] = view.message
 
-            elif action == "timeout":
-                # Handle timeout: Player didn't respond in time.
-                await send_embed(ctx, "You took too long to respond!")
-                return
+                if not view.message:
+                    raise commands.CommandError(
+                        "Failed to update the game embed. The original message may have been deleted, or I might have lost permissions to edit it."
+                    )
+                # Create tasks to wait for either a button interaction or a chat message ('h' or 's').
+                message_waiter = asyncio.create_task(
+                    self.bot.wait_for(
+                        'message',
+                        check=lambda m: m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ['h', 's']
+                    )
+                )
+                view_waiter = asyncio.create_task(view.wait())
+
+                # Wait for either the message or the button press to complete.
+                done, pending = await asyncio.wait(
+                    [message_waiter, view_waiter],
+                    return_when=asyncio.FIRST_COMPLETED # Return as soon as one task finishes.
+                )
+
+                # Cancel any pending tasks to clean up resources.
+                for future in pending:
+                    future.cancel()
+
+                # Get the result of the completed task
+                action: Optional[str] = None
+                result: Union[discord.Message, Any] = done.pop().result()
+
+                if isinstance(result, discord.Message): # If a message was sent, determine action based on its content.
+                    action = 'hit' if result.content.lower() == 'h' else 'stand'
+                    try:
+                        await result.delete() # Attempt to delete the command message for cleanliness.
+                    except (discord.Forbidden, discord.NotFound):
+                        pass
+                else: # If a button was pressed, get the action from the view.
+                    action = view.action
+                
+                # Remove buttons from the message after an action or timeout.
+                if game_message:
+                    await game_message.edit(view=None)
+
+                if action == "hit":
+                    game.player_hand.append(game.deal_card()) # Deal a new card to the player.
+                    if game.get_hand_value(game.player_hand) > 21: # Player busts (goes over 21).
+                        await update_user_balance(ctx.guild.id, user_id, -bet, "blackjack_loss", "BOT") # Deduct bet.
+                        await update_game_embed(game_over=True, view=None) # Show final hands.
+                        formatted_bet = await format_currency(ctx.guild.id, bet)
+                        await send_embed(ctx, f"Bust! You lose {formatted_bet}.")
+                        return # Game Ends
+                    continue # Continue Game Loop
+
+                elif action == "stand":
+                    # Player stands, now dealer plays.
+                    while game.get_hand_value(game.dealer_hand) < 17:
+                        game.dealer_hand.append(game.deal_card()) # Dealer hits until 17 or more.
+
+                    await update_game_embed(game_over=True, view=None) # Show final hands.
+                    player_value = game.get_hand_value(game.player_hand)
+                    dealer_value = game.get_hand_value(game.dealer_hand)
+                    formatted_bet = await format_currency(ctx.guild.id, bet)
+
+                    # Determine the winner.
+                    if dealer_value > 21 or player_value > dealer_value:
+                        # Player wins if dealer busts or player has higher score.
+                        await update_user_balance(ctx.guild.id, user_id, int(bet * 1.5), "blackjack_win", "BOT") # Player wins bet.
+                        await send_embed(ctx, f"You win {formatted_bet}!")
+                    elif player_value < dealer_value:
+                        # Player loses if dealer has higher score.
+                        await update_user_balance(ctx.guild.id, user_id, -bet, "blackjack_loss", "BOT") # Player loses bet.
+                        await send_embed(ctx, f"You lose {formatted_bet}.")
+                    else:
+                        # It's a push (tie).
+                        await send_embed(ctx, "It's a push! Your bet is returned.")
+                    return # Game Ends
+
+                elif action == "timeout":
+                    # on_timeout handles removal from active_games_set already
+                    await send_embed(ctx, "You took too long to respond!")
+                    return # Game ends
+
+        finally:
+            # Ensure player is removed from active games regardless of how the command exits
+            if user_id in self.active_games:
+                self.active_games.pop(user_id)
 
 async def setup(bot: commands.Bot) -> None:
     """

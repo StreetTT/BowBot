@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from utils.helpers import get_embed_color, send_embed
+from utils.helpers import *
 from typing import Optional, cast, List, Union, Dict
 
 class HelpCog(commands.Cog, name="Help"):
