@@ -1,8 +1,9 @@
 import discord
 from discord.ext import commands
 from utils.supabase_client import get_server_config, update_server_config, ServerConfig
-from utils.helpers import get_embed_color, guild_only
+from utils.helpers import get_embed_color, guild_only, format_currency
 from typing import List, Optional
+# FIXME: Add Channel configs
 
 def get_allowed_str(bot: commands.Bot, channels: List[str]):
     """Formats a list of channel IDs into a user-friendly string."""
@@ -50,22 +51,25 @@ class ConfigMainMenuView(discord.ui.View):
         config = await get_server_config(self.ctx.guild.id)
         color = await get_embed_color(self.ctx.guild.id)
         eco = config.get('economy', {})
-        drop = eco.get('money_drop', {})
+        drop = config.get('moneydrop', {})
 
         if section == "general":
             embed = discord.Embed(title="General Settings", color=color)
             embed.add_field(name="Prefix", value=f"`{config.get('prefix', '!')}`")
             embed.add_field(name="Embed Color", value=f"`{config.get('embed_color', '#0000FF')}`")
             embed.add_field(name="Allowed Channels", value=get_allowed_str(self.bot, config.get("allowed_channels", [])), inline=False)
+            embed.add_field(name="Bot Log Channel", value=f"<#{config.get('bot_log')}>" if config.get('bot_log') else "Not set")
+            embed.add_field(name="Config Log Channel", value=f"<#{config.get('config_log')}>" if config.get('config_log') else "Not set")
+            embed.add_field(name="Money Log Channel", value=f"<#{eco.get('log_channel')}>" if eco.get('log_channel') else "Not set")
         elif section == "currency":
             embed = discord.Embed(title="Currency Settings", color=color)
             embed.add_field(name="Name", value=f"**{eco['currency_name']}**")
             embed.add_field(name="Symbol", value=f"**{eco['currency_symbol']}**")
-            embed.add_field(name="Starting Balance", value=f"**{eco['currency_symbol']}{eco['starting_balance']}**")
+            embed.add_field(name="Starting Balance", value=f"**{await format_currency(self.ctx.guild.id, eco['starting_balance'])}**")
         elif section == "work":
             embed = discord.Embed(title="Work Settings", color=color)
             embed.add_field(name="Cooldown", value=f"**{eco['work_cooldown_hours']}h**")
-            embed.add_field(name="Range", value=f"**{eco['currency_symbol']}{eco['work_min_amount']} - {eco['currency_symbol']}{eco['work_max_amount']}**")
+            embed.add_field(name="Range", value=f"**{await format_currency(self.ctx.guild.id, eco['work_min_amount'])} - {await format_currency(self.ctx.guild.id, eco['work_max_amount'])}**")
         elif section == "steal":
             embed = discord.Embed(title="Steal Settings", color=color)
             embed.add_field(name="Cooldown", value=f"**{eco['steal_cooldown_hours']}h**")
@@ -76,8 +80,8 @@ class ConfigMainMenuView(discord.ui.View):
             embed = discord.Embed(title="Money Drop Settings", color=color)
             embed.add_field(name="Enabled", value=f"**{drop.get('enabled', False)}**")
             embed.add_field(name="Chance", value=f"**{drop.get('chance', 0.05) * 100:.0f}%**")
-            embed.add_field(name="Min-Max", value=f"**{eco['currency_symbol']}{drop.get('min_amount', 50)} - {eco['currency_symbol']}{drop.get('max_amount', 250)}**")
-            embed.add_field(name="Channels", value=get_allowed_str(self.bot, drop.get("allowed_channels", [])) or "All", inline=False)
+            embed.add_field(name="Range", value=f"**{await format_currency(self.ctx.guild.id, drop.get('min_amount', 50))} - {await format_currency(self.ctx.guild.id, drop.get('max_amount', 250))}**")
+            embed.add_field(name="Channels", value=get_allowed_str(self.bot, drop.get("allowed_channels", [])), inline=False)
         else:
             embed = discord.Embed(title="Configuration", description="Invalid section.", color=color)
             
@@ -344,7 +348,7 @@ class MoneyDropSettingsModal(discord.ui.Modal, title="Edit Money Drop Settings")
         super().__init__()
         self.ctx = ctx
         self.parent_view = parent_view
-        drop = config.get('economy', {}).get('money_drop', {})
+        drop = config.get('moneydrop', {})
 
         self.enabled = discord.ui.TextInput(label="Enabled (True/False)", default=str(drop.get('enabled', False)))
         self.chance = discord.ui.TextInput(label="Chance (0.0 to 1.0)", default=str(drop.get('chance', 0.05)))
@@ -392,13 +396,13 @@ class MoneyDropSettingsModal(discord.ui.Modal, title="Edit Money Drop Settings")
             await interaction.response.send_message(f"Invalid amount: {e}", ephemeral=True)
             return
 
-        money_drop_settings = {
+        moneydrop_settings = {
             "enabled": enabled,
             "chance": chance,
             "min_amount": min_amount,
             "max_amount": max_amount
         }
-        await update_server_config(self.ctx.guild.id, economy={"money_drop": money_drop_settings})
+        await update_server_config(self.ctx.guild.id, economy={"moneydrop": moneydrop_settings})
         await interaction.response.send_message("Money Drop settings updated!", ephemeral=True)
 
         embed = await self.parent_view.update_embed("moneydrop")

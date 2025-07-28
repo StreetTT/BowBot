@@ -1,4 +1,6 @@
 import os
+import logging
+from logging.handlers import RotatingFileHandler
 
 class Config:
     """
@@ -27,3 +29,25 @@ class Config:
 
 # Create a singleton instance of the Config class.
 config = Config()
+
+def get_logger() -> logging.Logger:
+    log_formatter = logging.Formatter('%(asctime)s %(levelname)s %(funcName)s(%(lineno)d) %(message)s')
+    log_file = 'bot.log'
+
+    # Setup file handler
+    file_handler = RotatingFileHandler(
+        log_file, mode='a', maxBytes=5*1024*1024, # Max 5 MB per log file.
+        backupCount=2, encoding='utf-8', delay=False # Keep 2 backup files, UTF-8 encoding.
+    )
+    file_handler.setFormatter(log_formatter)
+
+    # Setup console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_formatter)
+
+    # Get the root logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    return logger

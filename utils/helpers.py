@@ -1,35 +1,23 @@
-import logging
 import discord
 from discord.ext import commands
 from utils.supabase_client import get_server_config
 from typing import Optional, List, Union
 import logging
 import random
-from logging.handlers import RotatingFileHandler
 
 DEFAULT_EMBED_COLOR = "#0000FF"  # Default blue color for embeds
+BOT_OWNERS = [1011944834669486142]
+ACTION_DICT = {
+    "work": "work 💼",
+    "steal_success": "theft successful 🦹‍♂️",
+    "stolen_from": "stolen from 😱",
+    "steal_denied": "theft denied 🚫",
+    "steal_fail": "theft failed ❌",
+    "give_success": "gave 🎁",
+    "given_to": "given to 🤝",
+    "money_drop_claim": "money drop claim 💸"
+}
 
-def get_logger() -> logging.Logger:
-    log_formatter = logging.Formatter('%(asctime)s %(levelname)s %(funcName)s(%(lineno)d) %(message)s')
-    log_file = 'bot.log'
-
-    # Setup file handler
-    file_handler = RotatingFileHandler(
-        log_file, mode='a', maxBytes=5*1024*1024, # Max 5 MB per log file.
-        backupCount=2, encoding='utf-8', delay=False # Keep 2 backup files, UTF-8 encoding.
-    )
-    file_handler.setFormatter(log_formatter)
-
-    # Setup console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(log_formatter)
-
-    # Get the root logger
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    return logger
 
 async def get_embed_color(guild_id: Optional[int] = None) -> discord.Color:
     """
@@ -57,7 +45,6 @@ async def get_embed_color(guild_id: Optional[int] = None) -> discord.Color:
         return discord.Color(int(DEFAULT_EMBED_COLOR.lstrip('#'), 16))
 
 async def format_currency(guild_id: int, amount: int, include_name: bool = False) -> str:
-    # FIXME: This Should be used throughout the code
     """
     Formats a given amount of currency with the guild's custom currency symbol and name.
     Adjusts the currency name for pluralization (e.g., "pound" vs. "pounds").
@@ -172,9 +159,9 @@ def in_moneydrop_channels():
         assert ctx.guild is not None
 
         server_config = await get_server_config(ctx.guild.id)
-        # Access money_drop config, defaulting to an empty dict if not present
-        money_drop_config = server_config.get('economy', {}).get('money_drop', {})
-        allowed_channels = money_drop_config.get('allowed_channels', [])
+        # Access moneydrop config, defaulting to an empty dict if not present
+        moneydrop_config = server_config.get('moneydrop', {})
+        allowed_channels = moneydrop_config.get('allowed_channels', [])
 
         return await channel_check(ctx, allowed_channels)
     
@@ -203,3 +190,14 @@ async def amount_str_to_int(amount_str: str , balance: int, ctx: commands.Contex
     
     # Ensure bet is an integer at this point
     return int(amount_str_lower)
+
+def is_bot_owner():
+    """
+    A custom command check that ensures the command is used by a bot owner.
+    """
+    def predicate(ctx: commands.Context):
+        if ctx.author.id in BOT_OWNERS:
+            return True
+        else:
+            return False
+    return commands.check(predicate)

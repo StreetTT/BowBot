@@ -1,18 +1,22 @@
 import discord
 from discord.ext import commands
 from typing import Optional
-from utils.supabase_client import update_user_balance
+from utils.supabase_client import update_user_balance, get_server_config
+from utils.helpers import format_currency
+from cogs.economy import post_money_log
+
 
 class DropView(discord.ui.View):
     """
     View for the money drop button. This allows users to claim random money drops.
     Discord.ui.View enables interactive components like buttons on messages.
     """
-    def __init__(self, amount: int, currency_symbol: str, guild_id: int) -> None:
+    def __init__(self, amount: int, currency_symbol: str, guild_id: int, bot: commands.Bot) -> None:
         super().__init__(timeout=30.0)
         self.amount = amount
         self.currency_symbol = currency_symbol
         self.guild_id = guild_id
+        self.bot = bot
         self.claimed = False
         self.message: Optional[discord.Message] = None
 
@@ -41,9 +45,13 @@ class DropView(discord.ui.View):
 
         # Update the user's balance in the database.
         await update_user_balance(self.guild_id, interaction.user.id, self.amount, "money_drop_claim", "BOT")
-        formatted_amount = f"**{self.currency_symbol}{self.amount}**"
+        formatted_amount = await format_currency(self.guild_id, self.amount)
+
         # Send an ephemeral message confirming the claim to the user.
         await interaction.response.send_message(f"You claimed {formatted_amount}!", ephemeral=True)
+
+        if log_channel_id := (await get_server_config(self.guild_id)).get('log'):
+            await post_money_log(self.bot, self.guild_id, log_channel_id, "money_drop_claim", self.amount, "BOT", interaction.user.id)
 
     async def on_timeout(self) -> None:
         """

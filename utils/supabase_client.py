@@ -2,9 +2,8 @@ from supabase import create_client, Client
 from config import config
 from datetime import datetime, timezone
 from typing import TypedDict, List, Optional, Literal, Any, Dict, cast
-import logging
 from copy import deepcopy
-# FIXME: All IDs from discord should be strings
+from config import get_logger
 
 # --- Type Definitions ---
 # These TypedDicts define the expected structure of data stored in Supabase tables.
@@ -30,6 +29,7 @@ class EconomyConfig(TypedDict):
     starting_balance: int          # Initial balance for new users.
     currency_name: str             # Name of the in-game currency (e.g., "pounds").
     currency_symbol: str           # Symbol of the in-game currency (e.g., "£").
+    log: Optional[int]     # Channel ID for logging economy actions, if set.
     money_drop: MoneyDropConfig    # Nested dictionary for money drop settings.
 
 class ServerConfig(TypedDict):
@@ -41,6 +41,9 @@ class ServerConfig(TypedDict):
     allowed_channels: List[str]    # List of channel IDs where the bot is allowed to respond.
                                    # An empty list means all channels are allowed. [-1] means none are allowed.
     economy: EconomyConfig         # Nested dictionary for economy settings specific to this server.
+    moneydrop: MoneyDropConfig     # Money drop settings for this server.
+    update_log: Optional[int]      # Channel ID for logging Bot updates, if set.
+    config_log: Optional[int]      # Channel ID for logging configuration changes, if set.
 
 class EconomyData(TypedDict):
     """TypedDict for the 'economy' table, storing individual user economy data."""
@@ -69,6 +72,13 @@ supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
 # --- Default Values ---
 # Define the default economy configuration.
 # This ensures consistency for new servers and provides a fallback for missing settings.
+DEFAULT_MONEY_DROP_CONFIG: MoneyDropConfig = {
+    "enabled": False,
+    "chance": 0.05, # 5% chance per message for a money drop.
+    "min_amount": 50,
+    "max_amount": 150,
+    "allowed_channels": ["-1"]
+}
 DEFAULT_ECONOMY_CONFIG: EconomyConfig = {
     "work_cooldown_hours": 1,
     "steal_cooldown_hours": 6,
@@ -80,13 +90,8 @@ DEFAULT_ECONOMY_CONFIG: EconomyConfig = {
     "starting_balance": 1000,
     "currency_name": "pounds",
     "currency_symbol": "£",
-    "money_drop": {
-        "enabled": False,
-        "chance": 0.05, # 5% chance per message for a money drop.
-        "min_amount": 50,
-        "max_amount": 150,
-        "allowed_channels": ["-1"]
-    }
+    "log": None,
+    "money_drop": DEFAULT_MONEY_DROP_CONFIG
 }
 
 def deep_merge(source: Dict[str, Any], destination: Dict[str, Any]) -> Dict[str, Any]:
@@ -135,7 +140,10 @@ async def get_server_config(guild_id: int) -> ServerConfig:
             "prefix": "-",
             "embed_color": "#0000FF",
             "allowed_channels": [], # Empty list means all channels are allowed by default.
-            "economy": deepcopy(DEFAULT_ECONOMY_CONFIG)
+            "economy": deepcopy(DEFAULT_ECONOMY_CONFIG),
+            "moneydrop": deepcopy(DEFAULT_MONEY_DROP_CONFIG),
+            "update_log": None,
+            "config_log": None
         }
         # Insert the new default configuration into the 'server_configs' table.
         supabase.table('server_configs').insert(dict(new_config)).execute()
@@ -157,6 +165,10 @@ async def update_server_config(guild_id: int, **kwargs: Any) -> None:
             # If the 'economy' key is being updated, perform a deep merge.
             eco_settings_copy = deepcopy(cast(Dict[str, Any],current_config['economy']))
             update_data['economy'] = deep_merge(value, eco_settings_copy)
+        elif key == "moneydrop" and isinstance(value, dict):
+            # If the 'moneydrop' key is being updated, perform a deep merge.
+            moneydrop_copy = deepcopy(cast(Dict[str, Any], current_config['moneydrop']))
+            update_data['moneydrop'] = deep_merge(value, moneydrop_copy)
         else:
             update_data[key] = value
 
@@ -246,4 +258,17 @@ async def log_economy_action(guild_id: int, user_id: int, action: str, amount: i
         }).execute()
     except Exception as e:
         # Log any errors that occur during the logging process to the bot's log file.
-        logging.getLogger().error(f"Error logging economy action: {e}", exc_info=True)
+        get_logger().error(f"Error logging economy action: {e}", exc_info=True)
+
+async def get_server_with_bot_logging() -> List[ServerConfig]:
+    """
+    Retrieves the bot log channels from each guild.
+    """
+    try:
+        response = supabase.table('server_configs').select("*").execute()
+        if response and response.data:
+            return [cast(ServerConfig, config) for config in response.data if config["update_log"] is not None]
+        return []
+    except Exception as e:
+        get_logger().error(f"Error fetching bot log channels: {e}", exc_info=True)
+        return []

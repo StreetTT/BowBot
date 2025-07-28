@@ -16,7 +16,6 @@ if __name__ == "__main__":
     # TODO: New game to add: Roulette?
     # TODO: Chat Revive
     # TODO: Family Tree
-    # TODO: BOWBOT UPDATES Feed
     # TODO: SHOP for multipliers
     # TODO: Invite Link
     # TODO: Edit About

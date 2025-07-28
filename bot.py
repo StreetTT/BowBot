@@ -2,8 +2,7 @@ import discord
 from discord.ext import commands
 import os
 import random
-from utils.helpers import get_logger
-from config import config
+from config import config, get_logger
 from utils.supabase_client import get_server_config, update_user_economy
 from typing import List, Union
 logger = get_logger()
@@ -95,18 +94,18 @@ async def on_message(message: discord.Message) -> None:
     try:
         guild_id = message.guild.id
         server_config = await get_server_config(guild_id)
-        eco_config = server_config['economy']
-        drop_config = eco_config.get('money_drop', {})
+        eco_config = server_config.get('economy', {})
+        drop_config = server_config.get('moneydrop', {})
 
         # Check if money drops are enabled and if a random chance condition is met.
         if drop_config.get('enabled') and random.random() < drop_config.get('chance', 0.05):
             allowed_channels = drop_config.get('allowed_channels', [])
 
-            if allowed_channels == [-1]: # If explicitly disallowed.
+            if allowed_channels == ["-1"]: # If explicitly disallowed.
                 logger.debug(f"Money drop disallowed in all channels for guild {guild_id}.")
                 pass
             # If all channels are allowed (empty list) or the current channel is in the allowed list.
-            elif not allowed_channels or message.channel.id in allowed_channels:
+            elif not allowed_channels or str(message.channel.id) in allowed_channels:
                 if isinstance(message.channel, discord.TextChannel):
                     # Import DropView locally to avoid circular dependencies between cogs and bot.py.
                     from cogs.events import DropView
@@ -120,7 +119,7 @@ async def on_message(message: discord.Message) -> None:
                         description=f"Quick! The first person to click the button gets **{symbol}{amount}**!",
                         color=discord.Color.gold()
                     )
-                    view = DropView(amount=amount, currency_symbol=symbol, guild_id=guild_id)
+                    view = DropView(amount=amount, currency_symbol=symbol, guild_id=guild_id, bot=bot)
                     view.message = await message.channel.send(embed=embed, view=view)
                     logger.info(f"Money drop initiated in guild {guild_id}, channel {message.channel.id}")
                 else:
