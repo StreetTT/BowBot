@@ -1,32 +1,12 @@
 import discord
 from discord.ext import commands
 import os
-import logging
 import random
-from logging.handlers import RotatingFileHandler
+from utils.helpers import get_logger
 from config import config
 from utils.supabase_client import get_server_config, update_user_economy
 from typing import List, Union
-# --- Logging Setup ---
-log_formatter = logging.Formatter('%(asctime)s %(levelname)s %(funcName)s(%(lineno)d) %(message)s')
-log_file = 'bot.log'
-
-# Setup file handler
-file_handler = RotatingFileHandler(
-    log_file, mode='a', maxBytes=5*1024*1024, # Max 5 MB per log file.
-    backupCount=2, encoding='utf-8', delay=False # Keep 2 backup files, UTF-8 encoding.
-)
-file_handler.setFormatter(log_formatter)
-
-# Setup console handler
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(log_formatter)
-
-# Get the root logger
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-logger.addHandler(file_handler)
-logger.addHandler(console_handler)
+logger = get_logger()
 
 
 # --- Bot Setup ---

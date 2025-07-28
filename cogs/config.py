@@ -1,614 +1,410 @@
 import discord
 from discord.ext import commands
-from utils.supabase_client import get_server_config, update_server_config
-from utils.helpers import *
-from typing import Optional, List, Any
-# FIXME: This Command sucks, Refactor
+from utils.supabase_client import get_server_config, update_server_config, ServerConfig
+from utils.helpers import get_embed_color, guild_only
+from typing import List, Optional
 
 def get_allowed_str(bot: commands.Bot, channels: List[str]):
-    channels_str = ""
+    """Formats a list of channel IDs into a user-friendly string."""
     if not channels:
-        channels_str = "All channels currently allowed." # If empty, all are allowed.
+        return "All channels currently allowed." # If empty, all are allowed.
     elif channels == ["-1"]:
-        channels_str = "All channels currently disallowed." # If -1, none are allowed.
+        return "All channels currently disallowed." # If "-1", none are allowed.
     else:
         # Format channel mentions for display, filtering out invalid channel IDs.
         general_channels_list = [f"<#{_id}>" for _id in channels if bot.get_channel(int(_id))]
-        channels_str = "\n".join(general_channels_list) if general_channels_list else "No valid channels set."
-    return channels_str
+        return "\n".join(general_channels_list) if general_channels_list else "No valid channels set."
 
 class ConfigCog(commands.Cog, name="Configuration"):
-    """
-    Commands for server administrators to configure the bot's settings.
-    This cog provides a centralized way to manage various bot behaviors,
-    such as prefixes, embed colors, economy settings, and allowed channels.
-    All commands within this cog require administrator permissions.
-    """
-    def __init__(self, bot: commands.Bot) -> None:
+    """Cog for all configuration-related commands."""
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def _show_all_settings(self, ctx: commands.Context) -> None:
-        """
-        Helper function to display all server settings in a comprehensive embed message.
-        This provides an overview of the bot's current configuration.
-        """
-        assert ctx.guild is not None
-
-        # Fetch the current server configuration and extract economy settings.
-        config = await get_server_config(ctx.guild.id)
-        eco = config['economy']
-        drop = eco.get('money_drop', {}) # Get money drop settings, defaulting to empty dict if not present.
-
-        # Get the embed color from the server's configuration.
-        color = await get_embed_color(ctx.guild.id)
-        embed = discord.Embed(title=f"{ctx.guild.name}'s Bot Settings", color=color)
-
-        # Retrieve the list of allowed channels for general bot commands.
-        general_channels = config.get("allowed_channels", [])
-        general_channels_str = get_allowed_str(self.bot, general_channels)
-
-        # Retrieve the list of allowed channels specifically for money drops.
-        moneydrop_channels = drop.get("allowed_channels", [])
-        moneydrop_channels_str = get_allowed_str(self.bot, moneydrop_channels)
-
-
-        # Add fields to the embed for different categories of settings.
-        embed.add_field(name="General", value=f"Prefix: `{config['prefix']}`\n"
-                        f"Color: `{config['embed_color']}`\n"
-                        f"Channels: {general_channels_str}", inline=False)
-        embed.add_field(name="Currency", value=f"Name: **{eco['currency_name']}**\n"
-                        f"Symbol: **{eco['currency_symbol']}**", inline=True)
-        embed.add_field(name="Starting Balance", value=f"**{eco['currency_symbol']}{eco['starting_balance']}**", inline=True)
-        embed.add_field(name="Work", value=f"Cooldown: **{eco['work_cooldown_hours']}h**\n"
-                        f"Range: **{eco['currency_symbol']}{eco['work_min_amount']} - {eco['currency_symbol']}{eco['work_max_amount']}**", inline=False)
-        embed.add_field(name="Steal", value=f"Cooldown: **{eco['steal_cooldown_hours']}h**\n"
-                        f"Chance: **{eco['steal_chance'] * 100:.0f}%**\n"
-                        f"Penalty: **{eco['currency_symbol']}{eco['steal_penalty']}**\n"
-                        f"Max: **{eco['steal_max_percentage'] * 100:.0f}%** of balance", inline=False)
-        embed.add_field(name="Money Drops", value=f"Enabled: **{drop.get('enabled', False)}**\n"
-                                                    f"Chance: **{drop.get('chance', 0.05) * 100:.0f}% per message**\n"
-                                                    f"Min: **{eco['currency_symbol']}{drop.get('min_amount', 50)}**\n"
-                                                    f"Max: **{eco['currency_symbol']}{drop.get('max_amount', 250)}**\n"
-                                                    f"Channels: {moneydrop_channels_str}", inline=False)
-
-        # Add a footer instructing users on how to get more specific help.
-        embed.set_footer(text=f"Use '{config['prefix']}help config' to see how to change these values.")
-        await ctx.send(embed=embed)
-
-    @commands.group(name='config', invoke_without_command=True)
-    @commands.has_permissions(administrator=True)
+    @commands.command(name="config")
     @guild_only()
-    async def config_cmd(self, ctx: commands.Context) -> None:
-        """
-        Base command for bot configuration.
-        If no subcommand is given, it shows all current bot settings.
-        """
-        await self._show_all_settings(ctx)
-
-    # --- GENERAL SUB-GROUP ---
-    @config_cmd.group(name='general', invoke_without_command=True)
     @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def config_general(self, ctx: commands.Context) -> None:
-        """
-        View or edit general bot settings like prefix and embed color.
-        If no subcommand is given, it shows current general settings.
-        """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        general_channels = config.get("allowed_channels", [])
-        general_channels_str = get_allowed_str(self.bot, general_channels)
+    async def config_command(self, ctx: commands.Context):
+        """Displays the main configuration menu."""
+        view = ConfigMainMenuView(ctx, self)
+        embed = await view.update_embed("general")
+        view.message = await ctx.send(embed=embed, view=view)
+
+class ConfigMainMenuView(discord.ui.View):
+    """The main view for navigating and editing bot configurations."""
+    def __init__(self, ctx: commands.Context, cog: ConfigCog) -> None:
+        super().__init__(timeout=300)
+        self.ctx = ctx
+        self.bot = ctx.bot
+        self.cog = cog
+        self.message: Optional[discord.Message] = None
+        self.current_section = "general"
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Ensures only the command author can interact with the view."""
+        return interaction.user.id == self.ctx.author.id
+
+    async def update_embed(self, section: str) -> discord.Embed:
+        """Updates the embed to display the specified configuration section."""
+        assert self.ctx.guild is not None
+        self.current_section = section
+        config = await get_server_config(self.ctx.guild.id)
+        color = await get_embed_color(self.ctx.guild.id)
+        eco = config.get('economy', {})
+        drop = eco.get('money_drop', {})
+
+        if section == "general":
+            embed = discord.Embed(title="General Settings", color=color)
+            embed.add_field(name="Prefix", value=f"`{config.get('prefix', '!')}`")
+            embed.add_field(name="Embed Color", value=f"`{config.get('embed_color', '#0000FF')}`")
+            embed.add_field(name="Allowed Channels", value=get_allowed_str(self.bot, config.get("allowed_channels", [])), inline=False)
+        elif section == "currency":
+            embed = discord.Embed(title="Currency Settings", color=color)
+            embed.add_field(name="Name", value=f"**{eco['currency_name']}**")
+            embed.add_field(name="Symbol", value=f"**{eco['currency_symbol']}**")
+            embed.add_field(name="Starting Balance", value=f"**{eco['currency_symbol']}{eco['starting_balance']}**")
+        elif section == "work":
+            embed = discord.Embed(title="Work Settings", color=color)
+            embed.add_field(name="Cooldown", value=f"**{eco['work_cooldown_hours']}h**")
+            embed.add_field(name="Range", value=f"**{eco['currency_symbol']}{eco['work_min_amount']} - {eco['currency_symbol']}{eco['work_max_amount']}**")
+        elif section == "steal":
+            embed = discord.Embed(title="Steal Settings", color=color)
+            embed.add_field(name="Cooldown", value=f"**{eco['steal_cooldown_hours']}h**")
+            embed.add_field(name="Chance", value=f"**{eco['steal_chance'] * 100:.0f}%**")
+            embed.add_field(name="Penalty", value=f"**{eco['currency_symbol']}{eco['steal_penalty']}**")
+            embed.add_field(name="Max %", value=f"**{eco['steal_max_percentage'] * 100:.0f}%**")
+        elif section == "moneydrop":
+            embed = discord.Embed(title="Money Drop Settings", color=color)
+            embed.add_field(name="Enabled", value=f"**{drop.get('enabled', False)}**")
+            embed.add_field(name="Chance", value=f"**{drop.get('chance', 0.05) * 100:.0f}%**")
+            embed.add_field(name="Min-Max", value=f"**{eco['currency_symbol']}{drop.get('min_amount', 50)} - {eco['currency_symbol']}{drop.get('max_amount', 250)}**")
+            embed.add_field(name="Channels", value=get_allowed_str(self.bot, drop.get("allowed_channels", [])) or "All", inline=False)
+        else:
+            embed = discord.Embed(title="Configuration", description="Invalid section.", color=color)
+            
+        return embed
+
+    @discord.ui.button(label="General", style=discord.ButtonStyle.primary, custom_id="config:general")
+    async def general(self, interaction: discord.Interaction, _: discord.ui.Button):
+        embed = await self.update_embed("general")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Currency", style=discord.ButtonStyle.primary, custom_id="config:currency")
+    async def currency(self, interaction: discord.Interaction, _: discord.ui.Button):
+        embed = await self.update_embed("currency")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Work", style=discord.ButtonStyle.primary, custom_id="config:work")
+    async def work(self, interaction: discord.Interaction, _: discord.ui.Button):
+        embed = await self.update_embed("work")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Steal", style=discord.ButtonStyle.primary, custom_id="config:steal")
+    async def steal(self, interaction: discord.Interaction, _: discord.ui.Button):
+        embed = await self.update_embed("steal")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Money Drop", style=discord.ButtonStyle.primary, custom_id="config:moneydrop")
+    async def moneydrop(self, interaction: discord.Interaction, _: discord.ui.Button):
+        embed = await self.update_embed("moneydrop")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.secondary, custom_id="config:edit")
+    async def edit(self, interaction: discord.Interaction, _: discord.ui.Button):
+        """Opens the appropriate modal to edit the current section."""
+        assert self.ctx.guild is not None
+        config = await get_server_config(self.ctx.guild.id)
         
-        await send_embed(ctx, title="General Settings", description=f"Prefix: `{config['prefix']}`\nEmbed Color: `{config['embed_color']}`\nChannels: {general_channels_str}")
+        modals = {
+            "general": GeneralSettingsModal(self.ctx, self, config),
+            "currency": CurrencySettingsModal(self.ctx, self, config),
+            "work": WorkSettingsModal(self.ctx, self, config),
+            "steal": StealSettingsModal(self.ctx, self, config),
+            "moneydrop": MoneyDropSettingsModal(self.ctx, self, config)
+        }
+        
+        if modal := modals.get(self.current_section):
+            await interaction.response.send_modal(modal)
 
-    @config_general.command(name="prefix")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def general_prefix(self, ctx: commands.Context, new_prefix: Optional[str] = None) -> None:
-        """
-        View or set the bot's command prefix.
-        Parameters:
-        - `new_prefix`: Optional. The new prefix to set. If None, shows current prefix.
-        """
-        assert ctx.guild is not None
-        if new_prefix is None:
-            # If no new prefix is provided, display the current one.
-            config = await get_server_config(ctx.guild.id)
-            await send_embed(ctx, f"The current prefix is `{config['prefix']}`.")
-        else:
-            # Update the prefix in the database.
-            await update_server_config(ctx.guild.id, prefix=new_prefix)
-            await send_embed(ctx, f"Command prefix updated to `{new_prefix}`.")
+# --- Modals for Editing Configuration ---
 
-    @config_general.command(name="color")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def general_color(self, ctx: commands.Context, new_color: Optional[str] = None) -> None:
-        """
-        View or set the bot's embed color. Color should be a hexadecimal string (e.g., "#0000FF").
-        Parameters:
-        - `new_color`: Optional. The new hexadecimal color string. If None, shows current color.
-       """
-        assert ctx.guild is not None
-        if new_color is None:
-            config = await get_server_config(ctx.guild.id)
-            await send_embed(ctx, f"The current embed color is `{config['embed_color']}`.")
-        else:
-            await update_server_config(ctx.guild.id, embed_color=new_color)
-            await send_embed(ctx, f"Embed color updated to `{new_color}`.")
+class GeneralSettingsModal(discord.ui.Modal, title="Edit General Settings"):
+    def __init__(self, ctx: commands.Context, parent_view: ConfigMainMenuView, config: ServerConfig):
+        super().__init__()
+        self.ctx = ctx
+        self.parent_view = parent_view
+        
+        self.prefix = discord.ui.TextInput(label="Prefix", default=config.get('prefix', '!'))
+        self.embed_color = discord.ui.TextInput(label="Embed Color", default=config.get('embed_color', '#0000FF'))
+        self.add_item(self.prefix)
+        self.add_item(self.embed_color)
 
-    @config_general.group(name="channel", invoke_without_command=True)
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def general_channel(self, ctx: commands.Context) -> None:
-        """
-        Manage allowed channels for the bot.
-        If no subcommand is given, lists currently allowed channels.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        channels = config.get("allowed_channels", [])
-        if not channels:
-            await send_embed(ctx, "All channels are currently allowed.")
+    async def on_submit(self, interaction: discord.Interaction):
+        assert self.ctx.guild is not None, "This command can only be used in a guild."
+        
+        try:
+            if not self.prefix.value or len(self.prefix.value) > 10: # Check if prefix is empty or too long
+                raise ValueError("Prefix must be between 1 and 10 characters.")
+            if self.prefix.value.isdigit(): # Check if prefix is a number
+                raise ValueError("Prefix cannot be a number.")
+            
+            # Check if embed color is a valid hex
+            hex_int = int(self.embed_color.value.lstrip('#'), 16)
+            if len(self.embed_color.value.lstrip('#')) != 6 or hex_int < 0 or hex_int > 0xFFFFFF:
+                raise ValueError("Embed color must be a valid hex color (e.g., #0000FF).")
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid input: {e}", ephemeral=True)
+            return
+        
+        await update_server_config(self.ctx.guild.id, prefix=self.prefix.value, embed_color=self.embed_color.value)
+        await interaction.response.send_message("General settings updated!", ephemeral=True)
+        
+        embed = await self.parent_view.update_embed("general")
+        if self.parent_view.message:
+            await self.parent_view.message.edit(embed=embed)
+
+
+class CurrencySettingsModal(discord.ui.Modal, title="Edit Currency Settings"):
+    def __init__(self, ctx: commands.Context, parent_view: ConfigMainMenuView, config: ServerConfig):
+        super().__init__()
+        self.ctx = ctx
+        self.parent_view = parent_view
+        eco = config.get('economy', {})
+        
+        self.currency_name = discord.ui.TextInput(label="Currency Name", default=eco.get('currency_name', 'pounds'))
+        self.currency_symbol = discord.ui.TextInput(label="Currency Symbol", default=eco.get('currency_symbol', '£'))
+        self.starting_balance = discord.ui.TextInput(label="Starting Balance", default=str(eco.get('starting_balance', 1000)))
+        self.add_item(self.currency_name)
+        self.add_item(self.currency_symbol)
+        self.add_item(self.starting_balance)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        assert self.ctx.guild is not None, "This command can only be used in a guild."
+        
+        try: # Validate and convert starting balance to an integer.
+            if not (self.starting_balance.value and self.starting_balance.value.isdigit()):
+                raise ValueError("Please enter a number.")
+            starting_balance = int(self.starting_balance.value)
+            if starting_balance < 0:
+                raise ValueError("Starting balance must be non-negative.")
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid starting balance: {e}", ephemeral=True)
+            return
+        
+        if not self.currency_symbol.value or len(self.currency_symbol.value) > 5: # Check if currency symbol is empty or too long
+            await interaction.response.send_message("Invalid currency symbol: Currency symbol must be between 1 and 5 characters.", ephemeral=True)
+            return
+        
+        if not self.currency_name.value or len(self.currency_name.value) > 20: # Check if currency name is empty or too long
+            await interaction.response.send_message("Invalid currency name: Currency name must be between 1 and 20 characters.", ephemeral=True)
             return
 
-        # Create a list of channel mentions for display.
-        channel_mentions = [f"<#{_id}>" for _id in channels if self.bot.get_channel(int(_id))]
-        if not channel_mentions:
-             await send_embed(ctx, "No valid channels set in the allowed list.")
-             return
-        await send_embed(ctx, title="Allowed Channels", description="\n".join(channel_mentions))
+        economy_settings = {
+            "currency_name": self.currency_name.value,
+            "currency_symbol": self.currency_symbol.value,
+            "starting_balance": starting_balance
+        }
+        await update_server_config(self.ctx.guild.id, economy=economy_settings)
+        await interaction.response.send_message("Currency settings updated!", ephemeral=True)
 
-    @general_channel.command(name="toggle")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def general_channel_toggle(self, ctx: commands.Context, channel: discord.TextChannel) -> None:
-        """
-        Toggle a specific channel in the allowed list.
-        Adds the channel if not present, removes it if present.
-        Parameters:
-        - `channel`: The Discord text channel to toggle (automatically converted by Discord.py).
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        channels = config.get("allowed_channels", [])
+        embed = await self.parent_view.update_embed("currency")
+        if self.parent_view.message:
+            await self.parent_view.message.edit(embed=embed)
+
+
+class WorkSettingsModal(discord.ui.Modal, title="Edit Work Settings"):
+    def __init__(self, ctx: commands.Context, parent_view: ConfigMainMenuView, config: ServerConfig):
+        super().__init__()
+        self.ctx = ctx
+        self.parent_view = parent_view
+        eco = config.get('economy', {})
+
+        self.work_cooldown_hours = discord.ui.TextInput(label="Work Cooldown (hours)", default=str(eco.get('work_cooldown_hours', 1)))
+        self.work_min_amount = discord.ui.TextInput(label="Work Min Amount", default=str(eco.get('work_min_amount', 50)))
+        self.work_max_amount = discord.ui.TextInput(label="Work Max Amount", default=str(eco.get('work_max_amount', 500)))
+        self.add_item(self.work_cooldown_hours)
+        self.add_item(self.work_min_amount)
+        self.add_item(self.work_max_amount)
         
-        # If the setting is currently to disallow all ([-1]), reset to an empty list.
-        # This allows individual channels to be added after disallowing all.
-        if channels == ["-1"]:
-            channels = []
+    async def on_submit(self, interaction: discord.Interaction):
+        assert self.ctx.guild is not None, "This command can only be used in a guild."
 
-        if channel.id in channels:
-            channels.remove(str(channel.id))
-            await send_embed(ctx, f"Removed {channel.mention} from allowed channels.")
-        else:
-            channels.append(str(channel.id))
-            await send_embed(ctx, f"Added {channel.mention} to allowed channels.")
-        # Update the allowed channels list in the database.
-        await update_server_config(ctx.guild.id, allowed_channels=channels)
+        try: # Validate and convert work cooldown to an integer.
+            if not (self.work_cooldown_hours.value and self.work_cooldown_hours.value.isdigit()):
+                raise ValueError("Cooldown hours must be a valid number.")
+            work_cooldown_hours = int(self.work_cooldown_hours.value)
+            if work_cooldown_hours < 0:
+                raise ValueError("Cooldown hours must be non-negative.")
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid cooldown hours: {e}", ephemeral=True)
+            return
 
-    @general_channel.command(name="all")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def general_channel_all(self, ctx: commands.Context) -> None:
-        """
-        Allows the bot to operate in all channels by setting the allowed_channels list to empty.
-       """
-        assert ctx.guild is not None
-        await update_server_config(ctx.guild.id, allowed_channels=[])
-        await send_embed(ctx, "All channels are now allowed.")
+        try: # Validate and convert work amount range to an integer.
 
-    @general_channel.command(name="none")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def general_channel_none(self, ctx: commands.Context) -> None:
-        """
-        Disallows the bot from operating in any channel by setting allowed_channels to ["-1"].
-       """
-        assert ctx.guild is not None
-        await update_server_config(ctx.guild.id, allowed_channels=["-1"])
-        await send_embed(ctx, "All channels are now disallowed.")
+            if ((not (self.work_min_amount.value and self.work_max_amount.value)) and 
+                (not (self.work_min_amount.value.isdigit() and self.work_max_amount.value.isdigit()))):
+                raise ValueError("Min and max amounts must be valid numbers.")
+            
+            work_min_amount = int(self.work_min_amount.value)
+            work_max_amount = int(self.work_max_amount.value)
+            if work_min_amount < 0 or work_max_amount < 0:
+                raise ValueError("Min and max amounts must be non-negative.")
+            if work_min_amount > work_max_amount:
+                raise ValueError("Min amount cannot be greater than max amount.")
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid work amount: {e}", ephemeral=True)
+            return
 
-
-    # --- CURRENCY SUB-GROUP ---
-    @config_cmd.group(name='currency', invoke_without_command=True)
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def config_currency(self, ctx: commands.Context) -> None:
-        """
-        View or edit currency settings (name, symbol, starting balance).
-        If no subcommand is given, shows current currency settings.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        eco = config['economy']
-        await send_embed(ctx, title="Currency Settings", description=f"Name: **{eco['currency_name']}**\nSymbol: **{eco['currency_symbol']}**\nStarting Balance: **{eco['currency_symbol']}{eco['starting_balance']}**")
-
-    @config_currency.command(name="name")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def currency_name(self, ctx: commands.Context, *, new_name: Optional[str] = None) -> None:
-        """
-        View or set the currency's name (e.g., dollars, coins).
-        Parameters:
-        - `new_name`: Optional. The new name for the currency. If None, shows current name.
-       """
-        assert ctx.guild is not None
-        if new_name is None:
-            config = await get_server_config(ctx.guild.id)
-            await send_embed(ctx, f"The current currency name is **{config['economy']['currency_name']}**.")
-        else:
-            # Update nested dictionary field using a dictionary for `economy`.
-            await update_server_config(ctx.guild.id, economy={'currency_name': new_name})
-            await send_embed(ctx, f"Currency name updated to **{new_name}**.")
-
-    @config_currency.command(name="symbol")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def currency_symbol(self, ctx: commands.Context, new_symbol: Optional[str] = None) -> None:
-        """
-        View or set the currency's symbol (e.g., $, £).
-        Parameters:
-        - `new_symbol`: Optional. The new symbol for the currency. If None, shows current symbol.
-       """
-        assert ctx.guild is not None
-        if new_symbol is None:
-            config = await get_server_config(ctx.guild.id)
-            await send_embed(ctx, f"The current currency symbol is **{config['economy']['currency_symbol']}**.")
-        else:
-            await update_server_config(ctx.guild.id, economy={'currency_symbol': new_symbol})
-            await send_embed(ctx, f"Currency symbol updated to **{new_symbol}**.")
-
-    @config_currency.command(name="starting_balance")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def starting_balance(self, ctx: commands.Context, amount: Optional[int] = None) -> None:
-        """
-        View or set the starting balance for new users who join the server.
-        Parameters:
-        - `amount`: Optional. The new starting balance. If None, shows current starting balance.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        symbol = config['economy']['currency_symbol']
-        if amount is None:
-            await send_embed(ctx, f"The current starting balance is **{symbol}{config['economy']['starting_balance']}**.")
-        else:
-            await update_server_config(ctx.guild.id, economy={'starting_balance': amount})
-            await send_embed(ctx, f"Starting balance updated to **{symbol}{amount}**.")
-
-    # --- WORK SUB-GROUP ---
-    @config_cmd.group(name='work', invoke_without_command=True)
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def config_work(self, ctx: commands.Context) -> None:
-        """
-        View or edit settings for the 'work' command (cooldown, min/max earnings).
-        If no subcommand is given, shows current work settings.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        eco = config['economy']
-        symbol = eco['currency_symbol']
-        await send_embed(ctx, title="Work Command Settings", description=f"Cooldown: **{eco['work_cooldown_hours']} hours**\nMinimum Amount: **{symbol}{eco['work_min_amount']}**\nMaximum Amount: **{symbol}{eco['work_max_amount']}**")
-
-    @config_work.command(name="cooldown")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def work_cooldown(self, ctx: commands.Context, hours: Optional[int] = None) -> None:
-        """
-        View or set the cooldown period for the 'work' command in hours.
-        Parameters:
-        - `hours`: Optional. The new cooldown in hours. If None, shows current cooldown.
-       """
-        assert ctx.guild is not None
-        if hours is None:
-            config = await get_server_config(ctx.guild.id)
-            await send_embed(ctx, f"The current work cooldown is **{config['economy']['work_cooldown_hours']} hours**.")
-        else:
-            await update_server_config(ctx.guild.id, economy={'work_cooldown_hours': hours})
-            await send_embed(ctx, f"Work cooldown updated to **{hours} hours**.")
-
-    @config_work.command(name="min")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def work_min(self, ctx: commands.Context, amount: Optional[int] = None) -> None:
-        """
-        View or set the minimum amount of money earned from the 'work' command.
-        Parameters:
-        - `amount`: Optional. The new minimum amount. If None, shows current minimum.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        symbol = config['economy']['currency_symbol']
-        if amount is None:
-            await send_embed(ctx, f"The current minimum work amount is **{symbol}{config['economy']['work_min_amount']}**.")
-        else:
-            await update_server_config(ctx.guild.id, economy={'work_min_amount': amount})
-            await send_embed(ctx, f"Minimum work amount updated to **{symbol}{amount}**.")
-
-    @config_work.command(name="max")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def work_max(self, ctx: commands.Context, amount: Optional[int] = None) -> None:
-        """
-        View or set the maximum amount of money earned from the 'work' command.
-        Parameters:
-        - `amount`: Optional. The new maximum amount. If None, shows current maximum.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        symbol = config['economy']['currency_symbol']
-        if amount is None:
-            await send_embed(ctx, f"The current maximum work amount is **{symbol}{config['economy']['work_max_amount']}**.")
-        else:
-            await update_server_config(ctx.guild.id, economy={'work_max_amount': amount})
-            await send_embed(ctx, f"Maximum work amount updated to **{symbol}{amount}**.")
-    
-    # --- STEAL SUB-GROUP ---
-    @config_cmd.group(name='steal', invoke_without_command=True)
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def config_steal(self, ctx: commands.Context) -> None:
-        """
-        View or edit settings for the 'steal' command (cooldown, chance, penalty, max percentage).
-        If no subcommand is given, shows current steal settings.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        eco = config['economy']
-        symbol = eco['currency_symbol']
-        await send_embed(ctx, title="Steal Command Settings", description=f"Cooldown: **{eco['steal_cooldown_hours']} hours**\nChance: **{eco['steal_chance'] * 100:.0f}%**\nPenalty: **{symbol}{eco['steal_penalty']}**\nMax: **{eco['steal_max_percentage'] * 100:.0f}%** of balance")
-
-    @config_steal.command(name="cooldown")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def steal_cooldown(self, ctx: commands.Context, hours: Optional[int] = None) -> None:
-        """
-        View or set the cooldown period for the 'steal' command in hours.
-        Parameters:
-        - `hours`: Optional. The new cooldown in hours. If None, shows current cooldown.
-       """
-        assert ctx.guild is not None
-        if hours is None:
-            config = await get_server_config(ctx.guild.id)
-            await send_embed(ctx, f"The current work cooldown is **{config['economy']['steal_cooldown_hours']} hours**.")
-        else:
-            await update_server_config(ctx.guild.id, economy={'steal_cooldown_hours': hours})
-            await send_embed(ctx, f"Steal cooldown updated to **{hours} hours**.")
+        economy_settings = {
+            "work_cooldown_hours": work_cooldown_hours,
+            "work_min_amount": work_min_amount,
+            "work_max_amount": work_max_amount
+        }
+        await update_server_config(self.ctx.guild.id, economy=economy_settings)
+        await interaction.response.send_message("Work settings updated!", ephemeral=True)
         
-    
-    @config_steal.command(name="chance")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def steal_chance(self, ctx: commands.Context, chance: Optional[float] = None) -> None:
-        """
-        View or set the chance to successfully steal (as a decimal, e.g., 0.25 for 25%).
-        Parameters:
-        - `chance`: Optional. The new chance as a decimal. If None, shows current chance.
-       """
-        assert ctx.guild is not None
-        if chance is None:
-            config = await get_server_config(ctx.guild.id)
-            await send_embed(ctx, f"The current steal success chance is **{config['economy']['steal_chance'] * 100:.0f}%**.")
-        else:
-            await update_server_config(ctx.guild.id, economy={'steal_chance': chance})
-            await send_embed(ctx, f"Steal success chance updated to **{chance * 100:.0f}%**.")
+        embed = await self.parent_view.update_embed("work")
+        if self.parent_view.message:
+            await self.parent_view.message.edit(embed=embed)
 
-    @config_steal.command(name="penalty")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def steal_penalty(self, ctx: commands.Context, amount: Optional[int] = None) -> None:
-        """
-        View or set the amount of money a user loses if their steal attempt fails.
-        Parameters:
-        - `amount`: Optional. The new penalty amount. If None, shows current penalty.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        symbol = config['economy']['currency_symbol']
-        if amount is None:
-            await send_embed(ctx, f"The current steal penalty is **{symbol}{config['economy']['steal_penalty']}**.")
-        else:
-            await update_server_config(ctx.guild.id, economy={'steal_penalty': amount})
-            await send_embed(ctx, f"Steal penalty updated to **{symbol}{amount}**.")
+class StealSettingsModal(discord.ui.Modal, title="Edit Steal Settings"):
+    def __init__(self, ctx: commands.Context, parent_view: ConfigMainMenuView, config: ServerConfig):
+        super().__init__()
+        self.ctx = ctx
+        self.parent_view = parent_view
+        eco = config.get('economy', {})
 
-    @config_steal.command(name="max")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def steal_max(self, ctx: commands.Context, percentage: Optional[float] = None) -> None:
-        """
-        View or set the maximum percentage of a victim's balance that can be stolen.
-        Parameters:
-        - `percentage`: Optional. The new maximum percentage as a decimal. If None, shows current max.
-       """
-        assert ctx.guild is not None
-        if percentage is None:
-            config = await get_server_config(ctx.guild.id)
-            await send_embed(ctx, f"The current max steal amount is **{config['economy']['steal_max_percentage'] * 100:.0f}%** of target's balance.")
-        else:
-            await update_server_config(ctx.guild.id, economy={'steal_max_percentage': percentage})
-            await send_embed(ctx, f"Max steal percentage updated to **{percentage * 100:.0f}%**.")
+        self.steal_cooldown_hours = discord.ui.TextInput(label="Steal Cooldown (hours)", default=str(eco.get('steal_cooldown_hours', 6)))
+        self.steal_chance = discord.ui.TextInput(label="Steal Chance (0.0 to 1.0)", default=str(eco.get('steal_chance', 0.65)))
+        self.steal_penalty = discord.ui.TextInput(label="Steal Penalty", default=str(eco.get('steal_penalty', 100)))
+        self.steal_max_percentage = discord.ui.TextInput(label="Steal Max Percentage (0.0 to 1.0)", default=str(eco.get('steal_max_percentage', 0.25)))
+        self.add_item(self.steal_cooldown_hours)
+        self.add_item(self.steal_chance)
+        self.add_item(self.steal_penalty)
+        self.add_item(self.steal_max_percentage)
 
+    async def on_submit(self, interaction: discord.Interaction):
+        assert self.ctx.guild is not None, "This command can only be used in a guild."
 
-    @config_cmd.group(name='moneydrop', invoke_without_command=True)
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def config_moneydrop(self, ctx: commands.Context) -> None:
-        """
-        View or edit settings for random money drops (enabled, chance, min/max amounts, channels).
-        If no subcommand is given, shows current money drop settings.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        drop = config['economy'].get('money_drop', {})
-        symbol = config['economy']['currency_symbol']
-
-        moneydrop_channels = drop.get("allowed_channels", [])
-        moneydrop_channels_str = get_allowed_str(self.bot, moneydrop_channels)
-
-        await send_embed(
-            ctx,
-            title="Money Drop Settings",
-            description=f"Enabled: **{drop.get('enabled', False)}**\n"
-                        f"Chance: **{drop.get('chance', 0.05) * 100:.0f}% per message**\n"
-                        f"Min: **{symbol}{drop.get('min_amount', 50)}**\n"
-                        f"Max: **{symbol}{drop.get('max_amount', 250)}**\n"
-                        f"Channels: {moneydrop_channels_str}"
-        )
-
-    @config_moneydrop.command(name="enabled")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def moneydrop_enabled(self, ctx: commands.Context, toggle: Optional[bool] = None) -> None:
-        """
-        View or set whether money drops are enabled (True/False).
-        Parameters:
-        - `toggle`: Optional. Boolean value to enable or disable. If None, shows current status.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        if toggle is None:
-            await send_embed(ctx, f"Money drops are currently **{'enabled' if config['economy']['money_drop']['enabled'] else 'disabled'}**.")
-        else:
-            money_drop_config = config['economy'].get('money_drop', {})
-            money_drop_config['enabled'] = toggle
-            await update_server_config(ctx.guild.id, economy={'money_drop': money_drop_config})
-            await send_embed(ctx, f"Money drops have been **{'enabled' if toggle else 'disabled'}**.")
-
-    @config_moneydrop.command(name="chance")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def moneydrop_chance(self, ctx: commands.Context, chance: Optional[float] = None) -> None:
-        """
-        View or set the probability (as a decimal) of a money drop occurring per message.
-        Parameters:
-        - `chance`: Optional. The new chance as a decimal (e.g., 0.05 for 5%). If None, shows current chance.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        if chance is None:
-            await send_embed(ctx, f"Current money drop chance: **{config['economy']['money_drop']['chance'] * 100:.0f}%** per message.")
-        else:
-            money_drop_config = config['economy'].get('money_drop', {})
-            money_drop_config['chance'] = chance
-            await update_server_config(ctx.guild.id, economy={'money_drop': money_drop_config})
-            await send_embed(ctx, f"Money drop chance updated to **{chance * 100:.0f}%** per minute.")
-
-    @config_moneydrop.command(name="min")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def moneydrop_min(self, ctx: commands.Context, amount: Optional[int] = None) -> None:
-        """
-        View or set the minimum amount of money that can appear in a money drop.
-        Parameters:
-        - `amount`: Optional. The new minimum amount. If None, shows current minimum.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        symbol = config['economy']['currency_symbol']
-        if amount is None:
-            await send_embed(ctx, f"Minimum drop amount is **{symbol}{config['economy']['money_drop']['min_amount']}**.")
-        else:
-            money_drop_config = config['economy'].get('money_drop', {})
-            money_drop_config['min_amount'] = amount
-            await update_server_config(ctx.guild.id, economy={'money_drop': money_drop_config})
-            await send_embed(ctx, f"Minimum drop amount updated to **{symbol}{amount}**.")
-
-    @config_moneydrop.command(name="max")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def moneydrop_max(self, ctx: commands.Context, amount: Optional[int] = None) -> None:
-        """
-        View or set the maximum amount of money that can appear in a money drop.
-        Parameters:
-        - `amount`: Optional. The new maximum amount. If None, shows current maximum.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        symbol = config['economy']['currency_symbol']
-        if amount is None:
-            await send_embed(ctx, f"Maximum drop amount is **{symbol}{config['economy']['money_drop']['max_amount']}**.")
-        else:
-            money_drop_config = config['economy'].get('money_drop', {})
-            money_drop_config['max_amount'] = amount
-            await update_server_config(ctx.guild.id, economy={'money_drop': money_drop_config})
-            await send_embed(ctx, f"Maximum drop amount updated to **{symbol}{amount}**.")
-
-    @config_moneydrop.group(name="channel", invoke_without_command=True)
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def moneydrop_channel(self, ctx: commands.Context) -> None:
-        """
-        Manage allowed channels for money dropping.
-        If no subcommand is given, lists currently allowed channels for money drops.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        channels = config["economy"]["money_drop"].get("allowed_channels", [])
-        channels_str = get_allowed_str(self.bot, channels)
-        await send_embed(ctx, title="Allowed Money Drop Channels", description="\n".join(channels_str))
-
-    @moneydrop_channel.command(name="toggle")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def moneydrop_channel_toggle(self, ctx: commands.Context, channel: discord.TextChannel) -> None:
-        """
-        Toggle a specific channel in the allowed list for money drops.
-        Adds the channel if not present, removes it if present.
-        Parameters:
-        - `channel`: The Discord text channel to toggle.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        money_drop_config = config['economy'].get('money_drop', {})
-        channels = money_drop_config.get("allowed_channels", [])
+        try: # Validate and convert steal cooldown to an integer.
+            if not (self.steal_cooldown_hours.value and self.steal_cooldown_hours.value.isdigit()):
+                raise ValueError("Cooldown hours must be a valid number.")
+            steal_cooldown_hours = int(self.steal_cooldown_hours.value)
+            if steal_cooldown_hours < 0:
+                raise ValueError("Cooldown hours must be non-negative.")
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid cooldown hours: {e}", ephemeral=True)
+            return
         
-        # If currently disallowing all channels (["-1"]), reset to empty list.
-        if channels == ["-1"]:
-            channels = []
-
-        if channel.id in channels:
-            channels.remove(str(channel.id))
-            await send_embed(ctx, f"Removed {channel.mention} from allowed money drop channels.")
-        else:
-            channels.append(str(channel.id))
-            await send_embed(ctx, f"Added {channel.mention} to allowed money drop channels.")
+        try: # Validate and convert steal chance to a float.
+            if not (self.steal_chance.value and self.steal_chance.value.replace('.', '', 1).isdigit()):
+                raise ValueError("Steal chance must be a valid number between 0.0 and 1.0.")
+            steal_chance = float(self.steal_chance.value)
+            if not (0 <= steal_chance <= 1):
+                raise ValueError("Steal chance must be between 0.0 and 1.0.")
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid steal chance: {e}", ephemeral=True)
+            return
         
-        money_drop_config['allowed_channels'] = channels # Update the nested dictionary.
-        await update_server_config(ctx.guild.id, economy={'money_drop': money_drop_config})
+        try: # Validate and convert steal penalty to an integer.
+            if not (self.steal_penalty.value and self.steal_penalty.value.isdigit()):
+                raise ValueError("Steal penalty must be a valid number.")
+            steal_penalty = int(self.steal_penalty.value)
+            if steal_penalty < 0:
+                raise ValueError("Steal penalty must be non-negative.")
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid steal penalty: {e}", ephemeral=True)
+            return
+        
+        try: # Validate and convert steal max percentage to a float.
+            if not (self.steal_max_percentage.value and self.steal_max_percentage.value.replace('.', '', 1).isdigit()):
+                raise ValueError("Steal max percentage must be a valid number between 0.0 and 1.0.")
+            steal_max_percentage = float(self.steal_max_percentage.value)
+            if not (0 <= steal_max_percentage <= 1):
+                raise ValueError("Steal max percentage must be between 0.0 and 1.0.")
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid steal max percentage: {e}", ephemeral=True)
+            return
 
-    @moneydrop_channel.command(name="all")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def moneydrop_channel_all(self, ctx: commands.Context) -> None:
-        """
-        Allows money drops in all channels by setting the allowed_channels list to empty.
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        money_drop_config = config['economy'].get('money_drop', {})
-        money_drop_config['allowed_channels'] = []
-        await update_server_config(ctx.guild.id, economy={'money_drop': money_drop_config})
-        await send_embed(ctx, "All channels are now allowed for money drops.")
+        economy_settings = {
+            "steal_cooldown_hours": steal_cooldown_hours,
+            "steal_chance": steal_chance,
+            "steal_penalty": steal_penalty,
+            "steal_max_percentage": steal_max_percentage
+        }
+        await update_server_config(self.ctx.guild.id, economy=economy_settings)
+        await interaction.response.send_message("Steal settings updated!", ephemeral=True)
 
-    @moneydrop_channel.command(name="none")
-    @commands.has_permissions(administrator=True)
-    @guild_only()
-    async def moneydrop_channel_none(self, ctx: commands.Context) -> None:
-        """
-        Disallows money drops in all channels by setting allowed_channels to [-1].
-       """
-        assert ctx.guild is not None
-        config = await get_server_config(ctx.guild.id)
-        money_drop_config = config['economy'].get('money_drop', {})
-        money_drop_config['allowed_channels'] = ["-1"]
-        await update_server_config(ctx.guild.id, economy={'money_drop': money_drop_config})
-        await send_embed(ctx, "All channels are now disallowed for money drops.")
+        embed = await self.parent_view.update_embed("steal")
+        if self.parent_view.message:
+            await self.parent_view.message.edit(embed=embed)
+
+
+class MoneyDropSettingsModal(discord.ui.Modal, title="Edit Money Drop Settings"):
+    def __init__(self, ctx: commands.Context, parent_view: ConfigMainMenuView, config: ServerConfig):
+        super().__init__()
+        self.ctx = ctx
+        self.parent_view = parent_view
+        drop = config.get('economy', {}).get('money_drop', {})
+
+        self.enabled = discord.ui.TextInput(label="Enabled (True/False)", default=str(drop.get('enabled', False)))
+        self.chance = discord.ui.TextInput(label="Chance (0.0 to 1.0)", default=str(drop.get('chance', 0.05)))
+        self.min_amount = discord.ui.TextInput(label="Min Amount", default=str(drop.get('min_amount', 50)))
+        self.max_amount = discord.ui.TextInput(label="Max Amount", default=str(drop.get('max_amount', 150)))
+        self.add_item(self.enabled)
+        self.add_item(self.chance)
+        self.add_item(self.min_amount)
+        self.add_item(self.max_amount)
+        
+    async def on_submit(self, interaction: discord.Interaction):
+        assert self.ctx.guild is not None, "This command can only be used in a guild."
+
+        try: # Validate enabled value.
+            if self.enabled.value.lower() not in ('true', 'false', "0", "1", "yes", "no", "on", "off"):
+                raise ValueError("Enabled must be 'True' or 'False'.")
+            enabled = self.enabled.value.lower() in ('true', "1", "yes", "on")
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid enabled value: {e}", ephemeral=True)
+            return
+        
+        try: # Validate and convert chance to a float.
+            if not (self.chance.value and self.chance.value.replace('.', '', 1).isdigit()):
+                raise ValueError("Chance must be a valid number between 0.0 and 1.0.")
+            chance = float(self.chance.value)
+            if not (0 <= chance <= 1):
+                raise ValueError("Chance must be between 0.0 and 1.0.")
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid chance: {e}", ephemeral=True)
+            return
+
+        try: # Validate and convert amount range to an integer.
+
+            if ((not (self.min_amount.value and self.max_amount.value)) and
+                (not (self.min_amount.value.isdigit() and self.max_amount.value.isdigit()))):
+                raise ValueError("Min and max amounts must be valid numbers.")
+
+            min_amount = int(self.min_amount.value)
+            max_amount = int(self.max_amount.value)
+            if min_amount < 0 or max_amount < 0:
+                raise ValueError("Min and max amounts must be non-negative.")
+            if min_amount > max_amount:
+                raise ValueError("Min amount cannot be greater than max amount.")
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid amount: {e}", ephemeral=True)
+            return
+
+        money_drop_settings = {
+            "enabled": enabled,
+            "chance": chance,
+            "min_amount": min_amount,
+            "max_amount": max_amount
+        }
+        await update_server_config(self.ctx.guild.id, economy={"money_drop": money_drop_settings})
+        await interaction.response.send_message("Money Drop settings updated!", ephemeral=True)
+
+        embed = await self.parent_view.update_embed("moneydrop")
+        if self.parent_view.message:
+            await self.parent_view.message.edit(embed=embed)
 
 async def setup(bot: commands.Bot) -> None:
-    """
-    Sets up the ConfigCog by adding it to the bot.
-    This function is called by Discord.py when loading extensions.
-    """
+    """Sets up the ConfigCog and adds it to the bot."""
     await bot.add_cog(ConfigCog(bot))

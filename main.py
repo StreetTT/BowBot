@@ -20,3 +20,5 @@ if __name__ == "__main__":
     # TODO: SHOP for multipliers
     # TODO: Invite Link
     # TODO: Edit About
+    # TODO: Recent Transaction Log
+    # TODO: Graphs n Shi

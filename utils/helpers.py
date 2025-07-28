@@ -1,10 +1,35 @@
+import logging
 import discord
 from discord.ext import commands
 from utils.supabase_client import get_server_config
 from typing import Optional, List, Union
+import logging
 import random
+from logging.handlers import RotatingFileHandler
 
-DEFAULT_EMBED_COLOR = discord.Color.blue()
+DEFAULT_EMBED_COLOR = "#0000FF"  # Default blue color for embeds
+
+def get_logger() -> logging.Logger:
+    log_formatter = logging.Formatter('%(asctime)s %(levelname)s %(funcName)s(%(lineno)d) %(message)s')
+    log_file = 'bot.log'
+
+    # Setup file handler
+    file_handler = RotatingFileHandler(
+        log_file, mode='a', maxBytes=5*1024*1024, # Max 5 MB per log file.
+        backupCount=2, encoding='utf-8', delay=False # Keep 2 backup files, UTF-8 encoding.
+    )
+    file_handler.setFormatter(log_formatter)
+
+    # Setup console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_formatter)
+
+    # Get the root logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    return logger
 
 async def get_embed_color(guild_id: Optional[int] = None) -> discord.Color:
     """
@@ -19,9 +44,9 @@ async def get_embed_color(guild_id: Optional[int] = None) -> discord.Color:
         # Fetch server configuration. `get_server_config` handles defaults if no config exists.
         server_config = await get_server_config(guild_id)
         # Get the `embed_color` from the config, defaulting to "#0000FF" (blue) if not set.
-        hex_color: str = server_config.get('embed_color', '#0000FF')
+        hex_color: str = server_config.get('embed_color', DEFAULT_EMBED_COLOR)
     else:
-        hex_color = '#0000FF'
+        hex_color = DEFAULT_EMBED_COLOR  # Use default color if no guild ID is provided.
 
     try:
         # Convert hexadecimal string (e.g., "#RRGGBB") to an integer suitable for `discord.Color`.
@@ -29,9 +54,10 @@ async def get_embed_color(guild_id: Optional[int] = None) -> discord.Color:
         return discord.Color(int(hex_color.lstrip('#'), 16))
     except (ValueError, TypeError):
         # If conversion fails (e.g., invalid hex string), return the default color.
-        return DEFAULT_EMBED_COLOR
+        return discord.Color(int(DEFAULT_EMBED_COLOR.lstrip('#'), 16))
 
-async def format_currency(guild_id: int, amount: int) -> str:
+async def format_currency(guild_id: int, amount: int, include_name: bool = False) -> str:
+    # FIXME: This Should be used throughout the code
     """
     Formats a given amount of currency with the guild's custom currency symbol and name.
     Adjusts the currency name for pluralization (e.g., "pound" vs. "pounds").
@@ -52,9 +78,11 @@ async def format_currency(guild_id: int, amount: int) -> str:
     # Apply pluralization to the currency name if the amount is not 1 and the name doesn't already end in 's'.
     if amount != 1 and not name.endswith('s'):
         name += 's'
+    elif name.endswith('s') and amount == 1:
+        name = name[:-1] # Remove the 's'
 
     # Return the formatted string. Bold the symbol and amount.
-    return f"**{symbol}{amount}** {name}" # Updated to include name
+    return f"**{symbol}{amount}**{(' ' + name) if include_name else ''}"
 
 async def send_embed(ctx: commands.Context, description: str, title: Optional[str] = None) -> None:
     """

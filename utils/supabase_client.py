@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import TypedDict, List, Optional, Literal, Any, Dict, cast
 import logging
 from copy import deepcopy
+# FIXME: All IDs from discord should be strings
 
 # --- Type Definitions ---
 # These TypedDicts define the expected structure of data stored in Supabase tables.
