@@ -191,13 +191,16 @@ async def amount_str_to_int(amount_str: str , balance: int, ctx: commands.Contex
     # Ensure bet is an integer at this point
     return int(amount_str_lower)
 
-def is_bot_owner():
+def is_bot_owner_check():
     """
     A custom command check that ensures the command is used by a bot owner.
     """
-    def predicate(ctx: commands.Context):
-        if ctx.author.id in BOT_OWNERS:
-            return True
-        else:
-            return False
+    predicate = is_bot_owner
+    
     return commands.check(predicate)
+
+def is_bot_owner(ctx: commands.Context):
+    if ctx.author.id in BOT_OWNERS:
+        return True
+    else:
+        return False

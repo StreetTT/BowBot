@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from utils.supabase_client import get_server_with_bot_logging
-from utils.helpers import is_bot_owner, get_embed_color
+from utils.helpers import is_bot_owner_check, get_embed_color
 import asyncio
 
 class OwnerCog(commands.Cog, name="Owner"):
@@ -12,7 +12,7 @@ class OwnerCog(commands.Cog, name="Owner"):
         self.bot = bot
 
     @commands.command(name="postupdate", aliases=['pu'])
-    @is_bot_owner()
+    @is_bot_owner_check()
     async def postupdate(self, ctx: commands.Context, version: str) -> None:
         """
         Posts a Bot update message to all subscribed channels.
