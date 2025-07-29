@@ -1,8 +1,7 @@
 import discord
 from discord.ext import commands
 from utils.supabase_client import get_server_config
-from typing import Optional, List, Union
-import logging
+from typing import Optional, List, Union, Any
 import random
 
 DEFAULT_EMBED_COLOR = "#0000FF"  # Default blue color for embeds
@@ -18,8 +17,61 @@ ACTION_DICT = {
     "money_drop_claim": "money drop claim 💸"
 }
 
+async def post_money_log(bot: commands.Bot, guild_id: int, log_channel_id: Union[int, str], action: str, amount: int, type: str, user_id: int, target_user_id: Optional[int] = None):
+    """Posts a formatted economy log to the specified channel."""
+    if isinstance(log_channel_id, str):
+        log_channel_id = int(log_channel_id)
 
-async def get_embed_color(guild_id: Optional[int] = None) -> discord.Color:
+    log_channel = bot.get_channel(log_channel_id)
+    if not isinstance(log_channel, discord.TextChannel):
+        return
+
+    color = await get_embed_color(guild_id)
+    user = bot.get_user(user_id)
+
+    title  = f"{ACTION_DICT.get(action, action).capitalize()}"
+    
+    # Determine the title and description based on the action
+    if amount > 0:
+        color = discord.Color.green()
+    elif amount < 0:
+        color = discord.Color.red()
+    else:
+        color = discord.Color.greyple()
+
+    embed = discord.Embed(title=title, color=color)
+    embed.add_field(name="User", value=user.mention if user else f"ID: {user_id}", inline=True)
+    embed.add_field(name="Amount", value=str(amount), inline=True)
+
+    if target_user_id:
+        target_user = bot.get_user(target_user_id)
+        embed.add_field(name="Target User", value=target_user.mention if target_user else f"ID: {target_user_id}", inline=True)
+
+    embed.set_footer(text=f"Type: {type} | Date: {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    await log_channel.send(embed=embed)
+
+async def post_config_log(bot: commands.Bot, guild_id: int, log_channel_id: Union[int, str], changed_by: discord.Member, setting: str, old_value: Any, new_value: Any, method: str = "BOT"):
+    """Posts a formatted configuration log to the specified channel."""
+    if isinstance(log_channel_id, str):
+        log_channel_id = int(log_channel_id)
+
+    log_channel = bot.get_channel(log_channel_id)
+    if not isinstance(log_channel, discord.TextChannel):
+        return
+
+    color = await get_embed_color(guild_id)
+    
+    embed = discord.Embed(title="⚙️ Configuration Change", color=color)
+    embed.add_field(name="Setting Changed", value=f"`{setting}`", inline=False)
+    embed.add_field(name="Old Value", value=f"{'```' if '<#' not in old_value else ''}\n{old_value}\n{'```' if '<#' not in old_value else ''}", inline=True)
+    embed.add_field(name="New Value", value=f"{'```' if '<#' not in new_value else ''}\n{new_value}\n{'```' if '<#' not in new_value else ''}", inline=True)
+    
+    embed.set_footer(text=f"Changed by: {changed_by.display_name} | Method: {method} | Date: {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    await log_channel.send(embed=embed)
+
+async def get_embed_color(guild_id: Optional[Union[int, str]] = None) -> discord.Color:
     """
     Gets the configured embed color for a given guild from the Supabase database.
     Falls back to a default color if no custom color is set or if the set color is invalid.
@@ -28,6 +80,9 @@ async def get_embed_color(guild_id: Optional[int] = None) -> discord.Color:
     Returns:
     - A `discord.Color` object.
     """
+    if isinstance(guild_id, str):
+        guild_id = int(guild_id)
+
     if guild_id:
         # Fetch server configuration. `get_server_config` handles defaults if no config exists.
         server_config = await get_server_config(guild_id)

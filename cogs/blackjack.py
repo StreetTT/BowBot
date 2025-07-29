@@ -3,7 +3,6 @@ from discord.ext import commands
 import random
 import asyncio
 from typing import Optional, List, Dict, Any, Union, Set
-from cogs.economy import post_money_log
 from utils.supabase_client import get_user_economy_data, update_user_balance
 from utils.helpers import *
 
@@ -218,7 +217,7 @@ class BlackjackCog(commands.Cog, name="Blackjack"):
                 await update_game_embed(game_over=True, view=None) # Show final hands.
                 formatted_winnings = await format_currency(ctx.guild.id, winnings)
                 await send_embed(ctx, f"Blackjack! You win {formatted_winnings}!")
-                if log_channel_id := (await get_server_config(ctx.guild.id)).get('log'):
+                if log_channel_id := (await get_server_config(ctx.guild.id)).get('log_channel'):
                     await post_money_log(self.bot, ctx.guild.id, log_channel_id, "blackjack_win", winnings, "BOT", user_id)
                 return # Game ends
 
@@ -277,7 +276,7 @@ class BlackjackCog(commands.Cog, name="Blackjack"):
                         await update_game_embed(game_over=True, view=None) # Show final hands.
                         formatted_bet = await format_currency(ctx.guild.id, bet)
                         await send_embed(ctx, f"Bust! You lose {formatted_bet}.")
-                        if log_channel_id := (await get_server_config(ctx.guild.id)).get('log'):
+                        if log_channel_id := (await get_server_config(ctx.guild.id)).get('log_channel'):
                             await post_money_log(self.bot, ctx.guild.id, log_channel_id, "blackjack_loss", -bet, "BOT", user_id)
                         return # Game Ends
                     continue # Continue Game Loop
@@ -297,13 +296,13 @@ class BlackjackCog(commands.Cog, name="Blackjack"):
                         winnings = int(bet * 1.5) # Blackjack usually pays 1.5x the bet.
                         await update_user_balance(ctx.guild.id, user_id, winnings, "blackjack_win", "BOT") # Player wins bet.
                         await send_embed(ctx, f"You win {await format_currency(ctx.guild.id, winnings)}!")
-                        if log_channel_id := (await get_server_config(ctx.guild.id)).get('log'):
+                        if log_channel_id := (await get_server_config(ctx.guild.id)).get('log_channel'):
                             await post_money_log(self.bot, ctx.guild.id, log_channel_id, "blackjack_win", winnings, "BOT", user_id)
                     elif player_value < dealer_value:
                         # Player loses if dealer has higher score.
                         await update_user_balance(ctx.guild.id, user_id, -bet, "blackjack_loss", "BOT") # Player loses bet.
                         await send_embed(ctx, f"You lose {await format_currency(ctx.guild.id, -bet)}.")
-                        if log_channel_id := (await get_server_config(ctx.guild.id)).get('log'):
+                        if log_channel_id := (await get_server_config(ctx.guild.id)).get('log_channel'):
                             await post_money_log(self.bot, ctx.guild.id, log_channel_id, "blackjack_loss", -bet, "BOT", user_id)
                     else:
                         # It's a push (tie).

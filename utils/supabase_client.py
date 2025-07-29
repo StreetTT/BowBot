@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import TypedDict, List, Optional, Literal, Any, Dict, cast
 from copy import deepcopy
 from config import get_logger
+# FIXME: All IDs from discord should be strings: Must be done at night for minimal disruption
 
 # --- Type Definitions ---
 # These TypedDicts define the expected structure of data stored in Supabase tables.
@@ -29,12 +30,11 @@ class EconomyConfig(TypedDict):
     starting_balance: int          # Initial balance for new users.
     currency_name: str             # Name of the in-game currency (e.g., "pounds").
     currency_symbol: str           # Symbol of the in-game currency (e.g., "£").
-    log: Optional[int]     # Channel ID for logging economy actions, if set.
-    money_drop: MoneyDropConfig    # Nested dictionary for money drop settings.
+    log_channel: Optional[str]             # Channel ID for logging economy actions, if set.
 
 class ServerConfig(TypedDict):
     """TypedDict for the 'server_configs' table."""
-    guild_id: int                  # Discord guild (server) ID.
+    guild_id: str                  # Discord guild (server) ID.
     notes: Optional[str]           # For me to remember which server is which, 9/10 times holds the server name
     prefix: str                    # Bot's command prefix for this guild.
     embed_color: str               # Default embed color (hex string).
@@ -42,13 +42,13 @@ class ServerConfig(TypedDict):
                                    # An empty list means all channels are allowed. [-1] means none are allowed.
     economy: EconomyConfig         # Nested dictionary for economy settings specific to this server.
     moneydrop: MoneyDropConfig     # Money drop settings for this server.
-    update_log: Optional[int]      # Channel ID for logging Bot updates, if set.
-    config_log: Optional[int]      # Channel ID for logging configuration changes, if set.
+    update_log: Optional[str]      # Channel ID for logging Bot updates, if set.
+    config_log: Optional[str]      # Channel ID for logging configuration changes, if set.
 
 class EconomyData(TypedDict):
     """TypedDict for the 'economy' table, storing individual user economy data."""
-    guild_id: int                  # Discord guild ID.
-    user_id: int                   # Discord user ID.
+    guild_id: str                  # Discord guild ID.
+    user_id: str                   # Discord user ID.
     balance: int                   # User's current balance.
     last_work: Optional[str]       # Timestamp of the last 'work' command (ISO format string).
     last_steal: Optional[str]      # Timestamp of the last 'steal' command (ISO format string).
@@ -57,12 +57,12 @@ class EconomyData(TypedDict):
 class EconomyLog(TypedDict):
     """TypedDict for the 'economy_logs' table, tracking all economy transactions."""
     id: int                        # Unique log entry ID (auto-incrementing in DB).
-    guild_id: int                  # Discord guild ID where transaction occurred.
-    user_id: int                   # User ID involved in the transaction.
+    guild_id: str                  # Discord guild ID where transaction occurred.
+    user_id: str                   # User ID involved in the transaction.
     action: str                    # Description of the action (e.g., "work", "steal_success").
     amount: int                    # Amount of currency involved.
     type: Literal["BOT", "USER"]   # Whether the action was initiated by a "BOT" or a "USER".
-    target_user_id: Optional[int]  # Optional: User ID targeted by the action (e.g., in steal).
+    target_user_id: Optional[str]  # Optional: User ID targeted by the action (e.g., in steal).
     timestamp: str                 # Timestamp of the transaction (ISO format string).
 
 # Initialize the Supabase client using credentials from the `config` object.
@@ -90,8 +90,7 @@ DEFAULT_ECONOMY_CONFIG: EconomyConfig = {
     "starting_balance": 1000,
     "currency_name": "pounds",
     "currency_symbol": "£",
-    "log": None,
-    "money_drop": DEFAULT_MONEY_DROP_CONFIG
+    "log_channel": None
 }
 
 def deep_merge(source: Dict[str, Any], destination: Dict[str, Any]) -> Dict[str, Any]:
@@ -120,7 +119,7 @@ async def get_server_config(guild_id: int) -> ServerConfig:
     """
     # Query the 'server_configs' table for the specific guild_id.
     # `maybe_single()` attempts to return a single record or None.
-    response = supabase.table('server_configs').select("*").eq('guild_id', guild_id).maybe_single().execute()
+    response = supabase.table('server_configs').select("*").eq('guild_id', str(guild_id)).maybe_single().execute()
 
     if response and response.data:
         data = response.data
@@ -135,7 +134,7 @@ async def get_server_config(guild_id: int) -> ServerConfig:
     else:
         # If no configuration is found, create a new default configuration.
         new_config: ServerConfig = {
-            "guild_id": guild_id,
+            "guild_id": str(guild_id),
             "notes": None,
             "prefix": "-",
             "embed_color": "#0000FF",
@@ -174,7 +173,7 @@ async def update_server_config(guild_id: int, **kwargs: Any) -> None:
 
     if update_data:
         # Perform the update operation in Supabase.
-        supabase.table('server_configs').update(update_data).eq('guild_id', guild_id).execute()
+        supabase.table('server_configs').update(update_data).eq('guild_id', str(guild_id)).execute()
 
 async def get_user_economy_data(guild_id: int, user_id: int) -> EconomyData:
     """
@@ -183,7 +182,7 @@ async def get_user_economy_data(guild_id: int, user_id: int) -> EconomyData:
     Ensures every active user has an economy profile.
     """
     # Query the 'economy' table for the user's data in a specific guild.
-    response = supabase.table('economy').select("*").eq('guild_id', guild_id).eq('user_id', user_id).maybe_single().execute()
+    response = supabase.table('economy').select("*").eq('guild_id', str(guild_id)).eq('user_id', str(user_id)).maybe_single().execute()
     if response and response.data:
         return cast(EconomyData, response.data) # Return existing data.
 
@@ -191,8 +190,8 @@ async def get_user_economy_data(guild_id: int, user_id: int) -> EconomyData:
     server_config = await get_server_config(guild_id) # Get starting balance from server config.
     starting_balance = server_config['economy']['starting_balance']
     new_user_data: EconomyData = {
-        'guild_id': guild_id,
-        'user_id': user_id,
+        'guild_id': str(guild_id),
+        'user_id': str(user_id),
         'balance': starting_balance,
         'last_work': None,
         'last_steal': None,
@@ -215,7 +214,7 @@ async def update_user_economy(guild_id: int, user_id: int, data: Dict[str, Any])
     await get_user_economy_data(guild_id, user_id)
     if data:
         # Perform the update operation in Supabase.
-        supabase.table('economy').update(data).eq('guild_id', guild_id).eq('user_id', user_id).execute()
+        supabase.table('economy').update(data).eq('guild_id', str(guild_id)).eq('user_id', str(user_id)).execute()
 
 async def update_user_balance(guild_id: int, user_id: int, change: int, action: str, type: Literal["BOT", "USER"], target_user_id: Optional[int] = None) -> int:
     """
@@ -248,21 +247,21 @@ async def log_economy_action(guild_id: int, user_id: int, action: str, amount: i
     """
     try:
         supabase.table('economy_logs').insert({
-            'guild_id': guild_id,
-            'user_id': user_id,
+            'guild_id': str(guild_id),
+            'user_id': str(user_id),
             'action': action,
             'amount': amount,
             'type': type,
-            'target_user_id': target_user_id,
+            'target_user_id': str(target_user_id) if target_user_id else None,
             'timestamp': datetime.now(tz=timezone.utc).isoformat() # Store timestamp in ISO 8601 format with UTC timezone.
         }).execute()
     except Exception as e:
         # Log any errors that occur during the logging process to the bot's log file.
         get_logger().error(f"Error logging economy action: {e}", exc_info=True)
 
-async def get_server_with_bot_logging() -> List[ServerConfig]:
+async def get_server_with_update_feed() -> List[ServerConfig]:
     """
-    Retrieves the bot log channels from each guild.
+    Retrieves the update feed channels from each guild.
     """
     try:
         response = supabase.table('server_configs').select("*").execute()

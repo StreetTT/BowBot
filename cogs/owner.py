@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
-from utils.supabase_client import get_server_with_bot_logging
-from utils.helpers import is_bot_owner_check, get_embed_color
+from utils.supabase_client import get_server_with_update_feed
+from utils.helpers import *
 import asyncio
 
 class OwnerCog(commands.Cog, name="Owner"):
@@ -31,9 +31,9 @@ class OwnerCog(commands.Cog, name="Owner"):
             await ctx.send("You took too long to provide the update description.")
             return
 
-        channels = await get_server_with_bot_logging()
+        channels = await get_server_with_update_feed()
         for channel_dict in channels:
-            channel = self.bot.get_channel(channel_dict["update_log"]) # type: ignore
+            channel = self.bot.get_channel(int(channel_dict["update_log"])) # type: ignore
             if channel and isinstance(channel, discord.TextChannel):
                 guild_id = channel_dict.get("guild_id")
                 if guild_id:

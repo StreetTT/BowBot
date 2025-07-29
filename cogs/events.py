@@ -2,9 +2,7 @@ import discord
 from discord.ext import commands
 from typing import Optional
 from utils.supabase_client import update_user_balance, get_server_config
-from utils.helpers import format_currency
-from cogs.economy import post_money_log
-
+from utils.helpers import *
 
 class DropView(discord.ui.View):
     """
@@ -50,7 +48,7 @@ class DropView(discord.ui.View):
         # Send an ephemeral message confirming the claim to the user.
         await interaction.response.send_message(f"You claimed {formatted_amount}!", ephemeral=True)
 
-        if log_channel_id := (await get_server_config(self.guild_id)).get('log'):
+        if log_channel_id := (await get_server_config(self.guild_id)).get('economy', {}).get('log_channel'):
             await post_money_log(self.bot, self.guild_id, log_channel_id, "money_drop_claim", self.amount, "BOT", interaction.user.id)
 
     async def on_timeout(self) -> None:

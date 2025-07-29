@@ -15,35 +15,6 @@ from utils.helpers import *
 # Number of entries per page in the leaderboard
 LEADERBOARD_ENTRIES_PER_PAGE = 10
 
-async def post_money_log(bot: commands.Bot, guild_id: int, log_channel_id: int, action: str, amount: int, type: str, user_id: int, target_user_id: Optional[int] = None):
-    """Posts a formatted economy log to the specified channel."""
-    log_channel = bot.get_channel(log_channel_id)
-    if not isinstance(log_channel, discord.TextChannel):
-        return
-
-    color = await get_embed_color(guild_id)
-    user = bot.get_user(user_id)
-
-    title  = f"{ACTION_DICT.get(action, action).capitalize()}"
-    
-    # Determine the title and description based on the action
-    if amount > 0:
-        color = discord.Color.green()
-    else:
-        color = discord.Color.red()
-
-    embed = discord.Embed(title=title, color=color)
-    embed.add_field(name="User", value=user.mention if user else f"ID: {user_id}", inline=True)
-    embed.add_field(name="Amount", value=str(amount), inline=True)
-
-    if target_user_id:
-        target_user = bot.get_user(target_user_id)
-        embed.add_field(name="Target User", value=target_user.mention if target_user else f"ID: {target_user_id}", inline=True)
-
-    embed.set_footer(text=f"Type: {type} | Date: {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    await log_channel.send(embed=embed)
-
 class LeaderboardView(discord.ui.View):
     """
     A Discord UI View for the paginated leaderboard, containing navigation buttons.
@@ -247,7 +218,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         formatted_earnings = await format_currency(guild_id, earnings)
         await send_embed(ctx, f"You worked hard and earned {formatted_earnings}!")
 
-        if log_channel_id := eco_config.get('log'):
+        if log_channel_id := eco_config.get('log_channel'):
             await post_money_log(self.bot, guild_id, log_channel_id, "work", earnings, "USER", user_id)
 
     @commands.command(name='steal')
@@ -307,7 +278,7 @@ class EconomyCog(commands.Cog, name="Economy"):
                 # Cannot steal if target has no money.
                 await send_embed(ctx, f"**{member.mention}** has no money to steal!")
 
-                if log_channel_id := eco_config.get('log'):
+                if log_channel_id := eco_config.get('log_channel'):
                     await post_money_log(self.bot, guild_id, log_channel_id, "steal_denied", 0, "USER", user_id, member.id)
                 return
 
@@ -319,7 +290,7 @@ class EconomyCog(commands.Cog, name="Economy"):
 
             formatted_stolen = await format_currency(guild_id, amount_stolen)
             await send_embed(ctx, f"Success! You stole {formatted_stolen} from **{member.mention}**.")
-            if log_channel_id := eco_config.get('log'):
+            if log_channel_id := eco_config.get('log_channel'):
                 await post_money_log(self.bot, guild_id, log_channel_id, "steal_success", amount_stolen, "USER", user_id, member.id)
                 await post_money_log(self.bot, guild_id, log_channel_id, "stolen_from", -amount_stolen, "USER", member.id, user_id)
         else:
@@ -328,13 +299,13 @@ class EconomyCog(commands.Cog, name="Economy"):
             await update_user_balance(guild_id, user_id, -penalty, "steal_fail", "USER", member.id)
             formatted_penalty = await format_currency(guild_id, penalty)
             await send_embed(ctx, f"You were caught! You paid a penalty of {formatted_penalty}.")
-            if log_channel_id := eco_config.get('log'):
+            if log_channel_id := eco_config.get('log_channel'):
                 await post_money_log(self.bot, guild_id, log_channel_id, "steal_fail", -penalty, "USER", user_id, member.id)
 
     @commands.command(name='give')
     @guild_only()
     @in_allowed_channels()
-    async def give(self, ctx: commands.Context, member: Optional[Union[discord.Member, str]] = None, *, amount: Optional[int] = None) -> None:
+    async def give(self, ctx: commands.Context, member: Optional[Union[discord.Member, str]] = None, *, amount: Optional[str] = None) -> None:
         """
         Attempt to give money to another member.
         Parameters:
@@ -368,9 +339,9 @@ class EconomyCog(commands.Cog, name="Economy"):
         user_balance = user_data.get('balance', 0)
 
         # Determine Amount 
-        try:
-            amount_given = await amount_str_to_int(str(amount), user_balance, ctx)
-        except:
+        if amount:
+            amount_given = await amount_str_to_int(amount, user_balance, ctx)
+        else:
             # Random between 1 and max percentage of target's balance.
             amount_given = random.randint(1, min(20, user_balance))
         
@@ -391,7 +362,7 @@ class EconomyCog(commands.Cog, name="Economy"):
 
         config = await get_server_config(guild_id)
         eco_config = config['economy']
-        if log_channel_id := eco_config.get('log'):
+        if log_channel_id := eco_config.get('log_channel'):
             await post_money_log(self.bot, guild_id, log_channel_id, "give_success", -amount_given, "USER", user_id, member.id)
             await post_money_log(self.bot, guild_id, log_channel_id, "given_to", amount_given, "USER", member.id, user_id)
 
