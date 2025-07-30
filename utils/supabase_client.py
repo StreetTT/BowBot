@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import TypedDict, List, Optional, Literal, Any, Dict, cast
 from copy import deepcopy
 from config import get_logger
-# FIXME: All IDs from discord should be strings: Must be done at night for minimal disruption
 
 # --- Type Definitions ---
 # These TypedDicts define the expected structure of data stored in Supabase tables.
@@ -44,6 +43,14 @@ class ServerConfig(TypedDict):
     moneydrop: MoneyDropConfig     # Money drop settings for this server.
     update_log: Optional[str]      # Channel ID for logging Bot updates, if set.
     config_log: Optional[str]      # Channel ID for logging configuration changes, if set.
+    streamer: Optional[str]        # Discord user ID of the streamer, if set.
+
+class TikTokData(TypedDict):
+    username: Optional[str]        # TikTok username of the user.
+    id: Optional[str]              # TikTok ID of the user.
+    code: Optional[str]            # TikTok code for linking.
+    code_expires: Optional[str]    # Expiry time for the TikTok code (ISO format string).
+    link: Optional[str]            # TikTok link for the user.
 
 class EconomyData(TypedDict):
     """TypedDict for the 'economy' table, storing individual user economy data."""
@@ -53,6 +60,7 @@ class EconomyData(TypedDict):
     last_work: Optional[str]       # Timestamp of the last 'work' command (ISO format string).
     last_steal: Optional[str]      # Timestamp of the last 'steal' command (ISO format string).
     participant: bool              # If User has participated in the economy (used the bot)
+    tiktok: TikTokData         # TikTok related data, e.g., username or link.
 
 class EconomyLog(TypedDict):
     """TypedDict for the 'economy_logs' table, tracking all economy transactions."""
@@ -61,7 +69,7 @@ class EconomyLog(TypedDict):
     user_id: str                   # User ID involved in the transaction.
     action: str                    # Description of the action (e.g., "work", "steal_success").
     amount: int                    # Amount of currency involved.
-    type: Literal["BOT", "USER"]   # Whether the action was initiated by a "BOT" or a "USER".
+    type: Literal["BOT", "USER", "TIKTOK"] # Whether the action was initiated by "TIKTOK", "BOT" or "USER".
     target_user_id: Optional[str]  # Optional: User ID targeted by the action (e.g., in steal).
     timestamp: str                 # Timestamp of the transaction (ISO format string).
 
@@ -91,6 +99,13 @@ DEFAULT_ECONOMY_CONFIG: EconomyConfig = {
     "currency_name": "pounds",
     "currency_symbol": "£",
     "log_channel": None
+}
+DEFAULT_TIKTOK_DATA: TikTokData = {
+    "username": None,
+    "id": None,
+    "code": None,
+    "code_expires": None,
+    "link": None
 }
 
 def deep_merge(source: Dict[str, Any], destination: Dict[str, Any]) -> Dict[str, Any]:
@@ -142,7 +157,8 @@ async def get_server_config(guild_id: int) -> ServerConfig:
             "economy": deepcopy(DEFAULT_ECONOMY_CONFIG),
             "moneydrop": deepcopy(DEFAULT_MONEY_DROP_CONFIG),
             "update_log": None,
-            "config_log": None
+            "config_log": None,
+            "streamer": None
         }
         # Insert the new default configuration into the 'server_configs' table.
         supabase.table('server_configs').insert(dict(new_config)).execute()
@@ -156,18 +172,19 @@ async def update_server_config(guild_id: int, **kwargs: Any) -> None:
     - `guild_id`: The ID of the guild to update.
     - `**kwargs`: Keyword arguments representing the fields to update (e.g., `prefix="new!"`).
     """
-    current_config = await get_server_config(guild_id) # Fetch current config to merge changes.
     update_data: Dict[str, Any] = {}
 
     for key, value in kwargs.items():
-        if key == "economy" and isinstance(value, dict):
-            # If the 'economy' key is being updated, perform a deep merge.
-            eco_settings_copy = deepcopy(cast(Dict[str, Any],current_config['economy']))
-            update_data['economy'] = deep_merge(value, eco_settings_copy)
-        elif key == "moneydrop" and isinstance(value, dict):
-            # If the 'moneydrop' key is being updated, perform a deep merge.
-            moneydrop_copy = deepcopy(cast(Dict[str, Any], current_config['moneydrop']))
-            update_data['moneydrop'] = deep_merge(value, moneydrop_copy)
+        if key in ("economy", "moneydrop"):
+            current_config = await get_server_config(guild_id) # Fetch current config to merge changes.
+            if key == "economy" and isinstance(value, dict):
+                # If the 'economy' key is being updated, perform a deep merge.
+                eco_settings_copy = deepcopy(cast(Dict[str, Any],current_config['economy']))
+                update_data['economy'] = deep_merge(value, eco_settings_copy)
+            elif key == "moneydrop" and isinstance(value, dict):
+                # If the 'moneydrop' key is being updated, perform a deep merge.
+                moneydrop_copy = deepcopy(cast(Dict[str, Any], current_config['moneydrop']))
+                update_data['moneydrop'] = deep_merge(value, moneydrop_copy)
         else:
             update_data[key] = value
 
@@ -195,7 +212,8 @@ async def get_user_economy_data(guild_id: int, user_id: int) -> EconomyData:
         'balance': starting_balance,
         'last_work': None,
         'last_steal': None,
-        'participant': False
+        'participant': False,
+        'tiktok': DEFAULT_TIKTOK_DATA
     }
     # Insert the new user economy data into the 'economy' table.
     supabase.table('economy').insert(dict(new_user_data)).execute()
@@ -211,12 +229,20 @@ async def update_user_economy(guild_id: int, user_id: int, data: Dict[str, Any])
     - `data`: A dictionary of fields to update and their new values.
     """
     # Call `get_user_economy_data` first to ensure the user's entry exists.
-    await get_user_economy_data(guild_id, user_id)
-    if data:
-        # Perform the update operation in Supabase.
-        supabase.table('economy').update(data).eq('guild_id', str(guild_id)).eq('user_id', str(user_id)).execute()
 
-async def update_user_balance(guild_id: int, user_id: int, change: int, action: str, type: Literal["BOT", "USER"], target_user_id: Optional[int] = None) -> int:
+    update_data: Dict[str, Any] = {}
+
+    for key, value in data.items():
+        if key == "tiktok" and isinstance(value, dict):
+            # If the 'tiktok' key is being updated, perform a deep merge.
+            current_config = await get_user_economy_data(guild_id, user_id)
+            tiktok_copy = deepcopy(cast(Dict[str, Any], current_config['tiktok']))
+            update_data["tiktok"] = deep_merge(value, tiktok_copy)
+        else:
+            update_data[key] = value
+    supabase.table('economy').update(update_data).eq('guild_id', str(guild_id)).eq('user_id', str(user_id)).execute()
+
+async def update_user_balance(guild_id: int, user_id: int, change: int, action: str, type: Literal["BOT", "USER", "TIKTOK"], target_user_id: Optional[int] = None) -> int:
     """
     Updates a user's balance and logs the transaction to the 'economy_logs' table.
     This is the primary function for any balance modification.
@@ -239,7 +265,7 @@ async def update_user_balance(guild_id: int, user_id: int, change: int, action: 
     await log_economy_action(guild_id, user_id, action, change, type, target_user_id)
     return new_balance
 
-async def log_economy_action(guild_id: int, user_id: int, action: str, amount: int, type: Literal["BOT", "USER"], target_user_id: Optional[int] = None) -> None:
+async def log_economy_action(guild_id: int, user_id: int, action: str, amount: int, type: Literal["BOT", "USER", "TIKTOK"], target_user_id: Optional[int] = None) -> None:
     """
     Logs an economy transaction to the 'economy_logs' table.
     This provides an audit trail for all currency movements.

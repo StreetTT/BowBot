@@ -4,6 +4,15 @@ from utils.supabase_client import get_server_with_update_feed
 from utils.helpers import *
 import asyncio
 
+async def send_embed_to_feed(bot, embed) -> None:
+    channels = await get_server_with_update_feed()
+    for channel_dict in channels:
+        channel = bot.get_channel(int(channel_dict["update_log"])) # type: ignore
+        if channel and isinstance(channel, discord.TextChannel):
+            guild_id = channel_dict.get("guild_id")
+            if guild_id:
+                await channel.send(embed=embed)
+
 class OwnerCog(commands.Cog, name="Owner"):
     """
     Commands for interacting with the bot owners.
@@ -31,29 +40,22 @@ class OwnerCog(commands.Cog, name="Owner"):
             await ctx.send("You took too long to provide the update description.")
             return
 
-        channels = await get_server_with_update_feed()
-        for channel_dict in channels:
-            channel = self.bot.get_channel(int(channel_dict["update_log"])) # type: ignore
-            if channel and isinstance(channel, discord.TextChannel):
-                guild_id = channel_dict.get("guild_id")
-                if guild_id:
-                    embed_color = await get_embed_color(guild_id)
-                    embed = discord.Embed(title="BowBot Update", color=embed_color)
-                    
-                    # Use the content of the message sent after the command
-                    split_description = update_message.content.split("\n")
-                    for line in split_description:
-                        parts = line.strip().split(":", 1)  # Split at the first colon
-                        if len(parts) < 2:
-                            title = "\u200b"
-                            description = parts[0].strip()
-                        else:
-                            title = parts[0].strip()
-                            description = parts[1].strip()
-                        embed.add_field(name=title, value=description, inline=False)
+        embed = discord.Embed(title="BowBot Update", color=await get_embed_color())
+        split_description = update_message.content.split("\n")
+        for line in split_description:
+            parts = line.strip().split(":", 1)  # Split at the first colon
+            if len(parts) < 2:
+                title = "\u200b"
+                description = parts[0].strip()
+            else:
+                title = parts[0].strip()
+                description = parts[1].strip()
+            embed.add_field(name=title, value=description, inline=False)
 
-                    embed.set_footer(text=f"Version: {version}")
-                    await channel.send(embed=embed)
+        embed.set_footer(text=f"Version: {version}", icon_url=ctx.bot.user.avatar.url if ctx.bot.user.avatar else None)
+
+        await send_embed_to_feed(self.bot, embed)
+
 
 async def setup(bot: commands.Bot) -> None:
     """

@@ -89,6 +89,7 @@ This table stores the configuration for each server the bot is in.
 | `moneydrop`      | `jsonb`  | A JSON object containing the money drop settings for the server.                                                        |
 | `update_log`     | `text`   | The channel ID for bot update logs.                                                                                                |
 | `config_log`     | `text`   | The channel ID for configuration change logs.                                                                                      |
+| `streamer`     | `text`   | The discord user ID of the streamer.                                ID for configuration change logs.                                                                                      |
 
 ---
 
@@ -104,6 +105,7 @@ This table stores the economy data for each user in a server.
 | `last_work` | `timestamptz` | The timestamp of the last time the user used the `work` command. |
 | `last_steal`| `timestamptz` | The timestamp of the last time the user used the `steal` command. |
 | `participant`| `boolean` | `true` if the user has participated in the economy.   |
+| `tiktok` | `jsonb` |  A JSON object containing the tiktok data for the user. |
 
 ---
 
@@ -118,7 +120,7 @@ This table logs all economy-related transactions.
 | `user_id`        | `text`      | The user ID involved in the transaction.                     |
 | `action`         | `text`      | The action that was performed (e.g., "work", "steal_success"). |
 | `amount`         | `integer`   | The amount of currency involved in the transaction.          |
-| `type`           | `text`      | Who initiated the action: "BOT" or "USER".                   |
+| `type`           | `text`      | Who initiated the action: "TIKTOK", "BOT" or "USER".                   |
 | `target_user_id` | `text`      | The user ID of the target of the action (e.g., in a steal).  |
 | `timestamp`      | `timestamptz` | The timestamp of when the transaction occurred.              |
 

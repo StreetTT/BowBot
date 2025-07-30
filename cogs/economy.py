@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import random
 from datetime import datetime, timedelta, timezone
+from string import ascii_uppercase, digits
 from utils.supabase_client import (
     get_user_economy_data,
     update_user_balance,
@@ -77,7 +78,9 @@ class LeaderboardView(discord.ui.View):
             #     embed.set_thumbnail(url=user_avatar_url) # Removed: Only allows one thumbnail per embed.
 
 
-        embed.set_footer(text=f"Requested by {self.ctx.author.display_name} | Page {self.current_page + 1}/{self.total_pages}")
+        embed.set_footer(text=f"Requested by {self.ctx.author.display_name} | Page {self.current_page + 1}/{self.total_pages}",
+                         icon_url=self.ctx.author.avatar.url if self.ctx.author.avatar else None
+        )
         return embed
 
     async def _update_message(self) -> None:
@@ -179,7 +182,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         view.message = await ctx.send(embed=initial_embed, view=view)
 
 
-    @commands.command(name='work')
+    @commands.command(name='work', aliases=['w'])
     @guild_only()
     @in_allowed_channels()
     async def work(self, ctx: commands.Context) -> None:
@@ -221,7 +224,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if log_channel_id := eco_config.get('log_channel'):
             await post_money_log(self.bot, guild_id, log_channel_id, "work", earnings, "USER", user_id)
 
-    @commands.command(name='steal')
+    @commands.command(name='steal', aliases=['rob', 's'])
     @guild_only()
     @in_allowed_channels()
     async def steal(self, ctx: commands.Context, member: Optional[Union[discord.Member, str]] = None) -> None:
@@ -302,7 +305,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             if log_channel_id := eco_config.get('log_channel'):
                 await post_money_log(self.bot, guild_id, log_channel_id, "steal_fail", -penalty, "USER", user_id, member.id)
 
-    @commands.command(name='give')
+    @commands.command(name='give', aliases=['donate', 'g'])
     @guild_only()
     @in_allowed_channels()
     async def give(self, ctx: commands.Context, member: Optional[Union[discord.Member, str]] = None, *, amount: Optional[str] = None) -> None:
@@ -365,6 +368,92 @@ class EconomyCog(commands.Cog, name="Economy"):
         if log_channel_id := eco_config.get('log_channel'):
             await post_money_log(self.bot, guild_id, log_channel_id, "give_success", -amount_given, "USER", user_id, member.id)
             await post_money_log(self.bot, guild_id, log_channel_id, "given_to", amount_given, "USER", member.id, user_id)
+    
+
+    @commands.command(name='link', aliases=['l'])
+    @guild_only()
+    @in_allowed_channels()
+    async def link(self, ctx: commands.Context, username: str) -> None:
+        """
+        Links a TikTok username to the user's economy profile.
+        Parameters:
+        - `username`: The TikTok username to link.
+        """
+        assert ctx.guild is not None
+        user_data = await get_user_economy_data(ctx.guild.id, ctx.author.id)
+        prefix = (await get_server_config(ctx.guild.id))["prefix"]
+
+
+        already_linked = user_data.get('tiktok', {}).get('id')
+        if already_linked:
+            await send_embed(ctx, "You already have a TikTok account linked. Contact the Bot Owner to unlink it.")
+            return
+
+        code = "BowBot-" + ''.join(random.choices(ascii_uppercase + digits, k=8))
+        username = username.lstrip("@")
+
+        await update_user_economy(ctx.guild.id, ctx.author.id, {
+            'tiktok': {
+                'username': username,
+                'code': code,
+                'code_expires': (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                'link': f"https://www.tiktok.com/@{username}"
+            }
+        })
+
+        embed = discord.Embed(
+            title="TikTok Account Verification",
+            description=(
+                f"Great! Your TikTok username has been set to **{username}**.\n\n"
+                f"To verify your account and start earning, please **add the following code to your TikTok bio**:\n\n"
+                f"```\n{code}\n```\n\n"
+                f"Once you've updated your bio, go to the [server]({ctx.message.jump_url}) and run the `{prefix}verify` command."
+            ),
+            color=await get_embed_color(ctx.guild.id)
+        )
+        embed.set_footer(text="This code expires in 1 hour.")
+        dm_message = await ctx.author.send(embed=embed)
+        await send_embed(ctx,f"{ctx.author.mention}, I've sent you a [DM]({dm_message.jump_url}) with instructions on how to verify your account.")
+
+    @commands.command(name='verify', aliases=['v'])
+    @guild_only()
+    @in_allowed_channels()
+    async def verify(self, ctx: commands.Context) -> None:
+        assert ctx.guild is not None
+
+        user_data = await get_user_economy_data(ctx.guild.id, ctx.author.id)
+        tiktok_data = user_data.get('tiktok', {})
+        prefix = (await get_server_config(ctx.guild.id))["prefix"]
+        if not ((code := tiktok_data.get('code')) and (username := tiktok_data.get('username'))):
+            await send_embed(ctx, f"You don't have a TikTok account linked. Use `{prefix}link <username>` to link your account.")
+            return
+        
+        code_expires = tiktok_data.get('code_expires')
+        if code_expires is not None and datetime.fromisoformat(code_expires).astimezone(timezone.utc) < datetime.now(timezone.utc):
+            await send_embed(ctx, f"Your TikTok verification code has expired. Please link your account again using `{prefix}link <username>`.")
+            return
+
+        # Verify the TikTok account
+        await send_embed(ctx, f"Verifying your TikTok account...")
+        try:
+            res = await tiktok.verify_user(username, code)
+        except Exception as e:
+            await send_embed(ctx, f"Verification failed: {e}")
+            return
+
+        if res.get("verified") and (tiktok_id := res.get('tiktok_id')):
+
+            await update_user_economy(
+                ctx.guild.id, 
+                ctx.author.id, 
+                {'tiktok': {'code': None, 'id': tiktok_id, "code_expires": None}}
+            )
+
+            # Update the economy data to mark the user as a participant.
+            await send_embed(ctx, "Your TikTok account has been successfully verified! You can now earn from TikTok lives.")
+            return
+        
+        await send_embed(ctx, f"Verification failed, please try again.")
 
     # TODO: Random Messages for Steal + Work
     # TODO: Link to Tiktok to gain arrows from lives

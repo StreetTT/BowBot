@@ -87,51 +87,52 @@ async def on_message(message: discord.Message) -> None:
     Handles incoming messages for potential events and processes bot commands.
     This event is critical as it processes all non-bot messages for various features.
     """
-    if message.author.bot or not message.guild:
+    if message.author.bot:
         return # Ignore messages from bots and messages not in a guild.
-
-    # Money Drop Logic
-    try:
-        guild_id = message.guild.id
-        server_config = await get_server_config(guild_id)
-        eco_config = server_config.get('economy', {})
-        drop_config = server_config.get('moneydrop', {})
-
-        # Check if money drops are enabled and if a random chance condition is met.
-        if drop_config.get('enabled') and random.random() < drop_config.get('chance', 0.05):
-            allowed_channels = drop_config.get('allowed_channels', [])
-
-            if allowed_channels == ["-1"]: # If explicitly disallowed.
-                logger.debug(f"Money drop disallowed in all channels for guild {guild_id}.")
-                pass
-            # If all channels are allowed (empty list) or the current channel is in the allowed list.
-            elif not allowed_channels or str(message.channel.id) in allowed_channels:
-                if isinstance(message.channel, discord.TextChannel):
-                    # Import DropView locally to avoid circular dependencies between cogs and bot.py.
-                    from cogs.events import DropView
-                    # Determine the random amount for the money drop.
-                    amount = random.randint(drop_config.get('min_amount', 50), drop_config.get('max_amount', 250))
-                    symbol = eco_config.get('currency_symbol', '£')
-
-                    # Create and send an embed message with a "Claim!" button.
-                    embed = discord.Embed(
-                        title="💰 A Wild Money Drop Appeared! 💰",
-                        description=f"Quick! The first person to click the button gets **{symbol}{amount}**!",
-                        color=discord.Color.gold()
-                    )
-                    view = DropView(amount=amount, currency_symbol=symbol, guild_id=guild_id, bot=bot)
-                    view.message = await message.channel.send(embed=embed, view=view)
-                    logger.info(f"Money drop initiated in guild {guild_id}, channel {message.channel.id}")
-                else:
-                    logger.debug(f"Money drop attempted in non-text channel {message.channel.id} in guild {guild_id}.")
-            else:
-                logger.debug(f"Money drop not allowed in channel {message.channel.id} for guild {guild_id}.")
-
-    except Exception as e:
-        logger.error(f"Error in on_message money drop for guild {message.guild.id}: {e}", exc_info=True)
 
     # This ensures that bot commands are still processed even if a money drop occurs.
     await bot.process_commands(message)
+    
+    if message.guild:
+        # Money Drop Logic
+        try:
+            guild_id = message.guild.id
+            server_config = await get_server_config(guild_id)
+            eco_config = server_config.get('economy', {})
+            drop_config = server_config.get('moneydrop', {})
+
+            # Check if money drops are enabled and if a random chance condition is met.
+            if drop_config.get('enabled') and random.random() < drop_config.get('chance', 0.05):
+                allowed_channels = drop_config.get('allowed_channels', [])
+
+                if allowed_channels == ["-1"]: # If explicitly disallowed.
+                    logger.debug(f"Money drop disallowed in all channels for guild {guild_id}.")
+                    pass
+                # If all channels are allowed (empty list) or the current channel is in the allowed list.
+                elif not allowed_channels or str(message.channel.id) in allowed_channels:
+                    if isinstance(message.channel, discord.TextChannel):
+                        # Import DropView locally to avoid circular dependencies between cogs and bot.py.
+                        from cogs.events import DropView
+                        # Determine the random amount for the money drop.
+                        amount = random.randint(drop_config.get('min_amount', 50), drop_config.get('max_amount', 250))
+                        symbol = eco_config.get('currency_symbol', '£')
+
+                        # Create and send an embed message with a "Claim!" button.
+                        embed = discord.Embed(
+                            title="💰 A Wild Money Drop Appeared! 💰",
+                            description=f"Quick! The first person to click the button gets **{symbol}{amount}**!",
+                            color=discord.Color.gold()
+                        )
+                        view = DropView(amount=amount, currency_symbol=symbol, guild_id=guild_id, bot=bot)
+                        view.message = await message.channel.send(embed=embed, view=view)
+                        logger.info(f"Money drop initiated in guild {guild_id}, channel {message.channel.id}")
+                    else:
+                        logger.debug(f"Money drop attempted in non-text channel {message.channel.id} in guild {guild_id}.")
+                else:
+                    logger.debug(f"Money drop not allowed in channel {message.channel.id} for guild {guild_id}.")
+
+        except Exception as e:
+            logger.error(f"Error in on_message money drop for guild {message.guild.id}: {e}", exc_info=True)
 
 # --- Command Logging Hooks ---
 @bot.before_invoke

@@ -79,7 +79,7 @@ class HelpCog(commands.Cog, name="Help"):
                 commands_display = [f"`{cmd.name}`" for cmd in commands_list]
                 if commands_display:
                     embed.add_field(name=cog_name, value=" ".join(commands_display), inline=False)
-
+            embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
             await ctx.send(embed=embed)
             return
 
@@ -99,6 +99,7 @@ class HelpCog(commands.Cog, name="Help"):
                             value=cmd.short_doc or "No description.",
                             inline=False
                         )
+                embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
                 await ctx.send(embed=embed)
                 return
 
@@ -122,6 +123,7 @@ class HelpCog(commands.Cog, name="Help"):
                 if subcommands:
                     embed.add_field(name="Subcommands", value=" ".join(subcommands), inline=False)
 
+            embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
             await ctx.send(embed=embed)
             return
 

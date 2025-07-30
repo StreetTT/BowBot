@@ -27,6 +27,11 @@ class Config:
             raise ValueError("DISCORD_BOT_TOKEN environment variable is not set.")
         self.DISCORD_BOT_TOKEN = discord_bot_token.strip()
 
+        apofy_api_key = os.environ.get("APIFY_API_KEY")
+        if not apofy_api_key:
+            raise ValueError("APIFY_API_KEY environment variable is not set.")
+        self.APIFY_API_KEY = apofy_api_key.strip()
+
 # Create a singleton instance of the Config class.
 config = Config()
 

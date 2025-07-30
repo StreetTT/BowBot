@@ -3,6 +3,10 @@ from discord.ext import commands
 from utils.supabase_client import get_server_config
 from typing import Optional, List, Union, Any
 import random
+from utils.tiktok_service import TikTokService
+from config import get_logger
+
+log = get_logger()
 
 DEFAULT_EMBED_COLOR = "#0000FF"  # Default blue color for embeds
 BOT_OWNERS = [1011944834669486142]
@@ -56,6 +60,9 @@ async def post_config_log(bot: commands.Bot, guild_id: int, log_channel_id: Unio
     if isinstance(log_channel_id, str):
         log_channel_id = int(log_channel_id)
 
+    old_value = str(old_value) if old_value is not None else "None"
+    new_value = str(new_value) if new_value is not None else "None"
+
     log_channel = bot.get_channel(log_channel_id)
     if not isinstance(log_channel, discord.TextChannel):
         return
@@ -64,11 +71,18 @@ async def post_config_log(bot: commands.Bot, guild_id: int, log_channel_id: Unio
     
     embed = discord.Embed(title="⚙️ Configuration Change", color=color)
     embed.add_field(name="Setting Changed", value=f"`{setting}`", inline=False)
-    embed.add_field(name="Old Value", value=f"{'```' if '<#' not in old_value else ''}\n{old_value}\n{'```' if '<#' not in old_value else ''}", inline=True)
-    embed.add_field(name="New Value", value=f"{'```' if '<#' not in new_value else ''}\n{new_value}\n{'```' if '<#' not in new_value else ''}", inline=True)
+    # Use code block formatting only if the value does not contain '<' or '>'
+    def setting_format(val):
+        if '<' in val and '>' in val:
+            return val
+        return f"```\n{val}\n```"
+
+    embed.add_field(name="Old Value", value=setting_format(old_value), inline=True)
+    embed.add_field(name="New Value", value=setting_format(new_value), inline=True)
     
-    embed.set_footer(text=f"Changed by: {changed_by.display_name} | Method: {method} | Date: {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+    embed.set_footer(text=f"Changed by: {changed_by.display_name} | Method: {method} | Date: {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')}", 
+                     icon_url=changed_by.avatar.url if changed_by.avatar else None
+    )
     await log_channel.send(embed=embed)
 
 async def get_embed_color(guild_id: Optional[Union[int, str]] = None) -> discord.Color:
@@ -139,6 +153,7 @@ async def send_embed(ctx: commands.Context, description: str, title: Optional[st
     assert ctx.guild is not None
     color = await get_embed_color(ctx.guild.id)
     embed = discord.Embed(description=description, color=color)
+    embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
     if title:
         embed.title = title
     # Send the embed message to the channel where the command was invoked.
@@ -259,3 +274,5 @@ def is_bot_owner(ctx: commands.Context):
         return True
     else:
         return False
+    
+tiktok = TikTokService()

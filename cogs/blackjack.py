@@ -133,7 +133,7 @@ class BlackjackCog(commands.Cog, name="Blackjack"):
         self.bot = bot
         self.active_games: Dict[int, Optional[discord.Message]] = {} # Track active games by user ID
 
-    @commands.command(name='blackjack', aliases=['bj'])
+    @commands.command(name='blackjack', aliases=['bj', '21'])
     @guild_only()
     @in_allowed_channels()
     async def blackjack(self, ctx: commands.Context, *, bet_str: str) -> None:
@@ -146,7 +146,7 @@ class BlackjackCog(commands.Cog, name="Blackjack"):
         user_id = ctx.author.id
 
         # --- Prevent Concurrent Games ---
-        if user_id in self.active_games and self.active_games[user_id] is discord.Message:
+        if user_id in self.active_games and self.active_games[user_id] is not None:
             await send_embed(ctx, f"You are already in a blackjack game! Please finish your [current game]({self.active_games[user_id].jump_url}) before starting another.") # type: ignore
             return
 
@@ -200,7 +200,7 @@ class BlackjackCog(commands.Cog, name="Blackjack"):
 
                 # Add footer instructions if the game is ongoing.
                 if not game_over:
-                    embed.set_footer(text="Click a button or type 'h' for hit, 's' for stand.")
+                    embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
 
                 # Edit the existing message or send a new one.
                 if game_message:

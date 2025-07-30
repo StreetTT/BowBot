@@ -13,10 +13,14 @@ if __name__ == "__main__":
     # This is the entry point for the entire bot application.
     asyncio.run(main())
 
-    # TODO: New game to add: Roulette?
-    # TODO: Chat Revive
+    # TODO: Roulette
+    # TODO: MI5 ( 007 Roles)
+    # TODO: PvP
     # TODO: Family Tree
-    # TODO: SHOP for multipliers
+    # TODO: Bank of Bow : 100K per person (More ways to lose money)
+    # TODO: TikFinity Link
+    # TODO: Shop: Roles, Chat, multipliers
+    # TODO: Chat Revive
     # TODO: Invite Link
     # TODO: Edit About
     # TODO: Recent Transaction Log

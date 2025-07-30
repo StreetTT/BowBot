@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from utils.supabase_client import get_server_config, update_server_config, ServerConfig
+from utils.supabase_client import get_server_config, get_user_economy_data, update_server_config, ServerConfig
 from utils.helpers import *
 from typing import List, Optional
 
@@ -162,7 +162,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
                                   log_channel_id, 
                                   ctx.author, #type: ignore
                                   "update_log", 
-                                  f"<#{old_config.get('update_log', 'None')}>", 
+                                  f"<#{old_config.get('update_log')}>" if old_config.get("update_log") else "None", 
                                   channel.mention if channel else "None"
             )
 
@@ -232,10 +232,37 @@ class ConfigCog(commands.Cog, name="Configuration"):
                                   log_channel_id, 
                                   ctx.author, #type: ignore
                                   "config_log", 
-                                  f"<#{old_config.get("economy", {}).get('config_log', 'None')}>", 
+                                  f"<#{old_config.get("economy", {}).get('log_channel')}>" if old_config.get("economy", {}).get('log_channel') else "None",
                                   channel.mention if channel else "None"
             )
 
+    @commands.command(name="settiktok", aliases=["settt", "stt"])
+    @guild_only()
+    @commands.has_permissions(administrator=True)
+    async def set_tiktok(self, ctx: commands.Context):
+        """Sets the TikTok username for the server to watch for live events."""
+        assert ctx.guild is not None
+        old_config = await get_server_config(ctx.guild.id)
+        user_data = await get_user_economy_data(ctx.guild.id, ctx.author.id)  # Ensure the user has an economy entry
+
+        if user_data and user_data.get("tiktok").get("id"):
+            tiktok_username = user_data["tiktok"]["username"]
+
+            # Use your existing update_server_config function to set the new field
+            await update_server_config(ctx.guild.id, streamer=ctx.author.id)
+            await send_embed(ctx, f"✅ **TikTok Stream Updated!** This server will now monitor events for the user **@{tiktok_username}**.")
+            if log_channel_id := old_config.get("config_log"):
+                await post_config_log(self.bot, 
+                                    ctx.guild.id, 
+                                    log_channel_id, 
+                                    ctx.author, #type: ignore
+                                    "config_log", 
+                                    f"<@{old_config.get("streamer")}>" if old_config.get("streamer") else "None",
+                                    ctx.author.mention
+                )
+        else:
+            await send_embed(ctx, "❌ **TikTok Stream Not Found!** Please ensure you have a TikTok account linked to your profile.")
+        
 class ConfigMainMenuView(discord.ui.View):
     """The main view for navigating and editing bot configurations."""
     def __init__(self, ctx: commands.Context, cog: ConfigCog) -> None:
@@ -290,7 +317,7 @@ class ConfigMainMenuView(discord.ui.View):
             embed.add_field(name="Channels", value=get_allowed_str(self.bot, drop.get("allowed_channels", [])), inline=False)
         else:
             embed = discord.Embed(title="Configuration", description="Invalid section.", color=color)
-            
+        embed.set_footer(text=self.ctx.author.display_name, icon_url=self.ctx.author.avatar.url if self.ctx.author.avatar else None)    
         return embed
 
     @discord.ui.button(label="General", style=discord.ButtonStyle.primary, custom_id="config:general")
@@ -662,7 +689,7 @@ class MoneyDropSettingsModal(discord.ui.Modal, title="Edit Money Drop Settings")
             "min_amount": min_amount,
             "max_amount": max_amount
         }
-        await update_server_config(self.ctx.guild.id, economy={"moneydrop": moneydrop_settings})
+        await update_server_config(self.ctx.guild.id, moneydrop=moneydrop_settings)
         await interaction.response.send_message("Money Drop settings updated!", ephemeral=True)
 
         embed = await self.parent_view.update_embed("moneydrop")
