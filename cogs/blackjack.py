@@ -116,12 +116,13 @@ class BlackjackView(discord.ui.View):
         Called when the view times out (no interaction within the timeout period).
         Removes the player from the active games set.
         """
-        if self.message:
-            # Edit the original message to remove the view (buttons).
-            await self.message.edit(view=None)
-        # Remove the player from the active games set if the game times out
         if self.player_id in self.active_games:
-            self.active_games.pop(self.player_id)
+            if self.message:
+                # Edit the original message to remove the view (buttons).
+                await self.message.edit(view=None)
+            # Remove the player from the active games set if the game times out
+            if self.player_id in self.active_games:
+                self.active_games.pop(self.player_id)
 
 
 class BlackjackCog(commands.Cog, name="Blackjack"):

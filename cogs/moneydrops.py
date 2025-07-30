@@ -64,31 +64,9 @@ class DropView(discord.ui.View):
                     item.disabled = True
             await self.message.edit(view=self)
 
-
-class EventsCog(commands.Cog, name="Events"):
-    """
-    Handles background tasks and events like money drops.
-    This cog is intended for functionalities that run in response to Discord events
-    or on a schedule, rather than direct commands.
-    """
-    def __init__(self, bot: commands.Bot) -> None:
-        self.bot = bot
-
-    # def cog_unload(self) -> None:
-    #     """
-    #     Cleanup method called when the cog is unloaded.
-    #     Currently empty, but can be used for stopping tasks or closing resources.
-    #     """
-    #     pass # Placeholder for future cleanup tasks.
-
 async def setup(bot: commands.Bot) -> None:
     """
     Sets up the Events cog by adding it to the bot.
     This function is called by Discord.py when loading extensions.
     """
-    # The line `await bot.add_cog(EventsCog(bot))` is commented out because
-    # the main `on_message` event responsible for initiating money drops
-    # is handled directly in `bot.py` to avoid circular import issues.
-    # If this cog had other independent event listeners, it would be uncommented.
-    # await bot.add_cog(EventsCog(bot))
     pass

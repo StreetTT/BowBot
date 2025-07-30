@@ -92,7 +92,7 @@ async def on_message(message: discord.Message) -> None:
 
     # This ensures that bot commands are still processed even if a money drop occurs.
     await bot.process_commands(message)
-    
+
     if message.guild:
         # Money Drop Logic
         try:
@@ -112,7 +112,7 @@ async def on_message(message: discord.Message) -> None:
                 elif not allowed_channels or str(message.channel.id) in allowed_channels:
                     if isinstance(message.channel, discord.TextChannel):
                         # Import DropView locally to avoid circular dependencies between cogs and bot.py.
-                        from cogs.events import DropView
+                        from cogs.moneydrops import DropView
                         # Determine the random amount for the money drop.
                         amount = random.randint(drop_config.get('min_amount', 50), drop_config.get('max_amount', 250))
                         symbol = eco_config.get('currency_symbol', '£')

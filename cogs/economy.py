@@ -254,7 +254,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         last_steal_str: Optional[str] = user_data.get('last_steal')
         if last_steal_str:
             last_steal_time = datetime.fromisoformat(last_steal_str).astimezone(timezone.utc)
-            cooldown = timedelta(hours=eco_config['steal_cooldown_hours'])
+            cooldown = timedelta(hours=eco_config.get('steal_cooldown_hours', 6))
             if datetime.now(timezone.utc) < last_steal_time + cooldown:
                 remaining = (last_steal_time + cooldown) - datetime.now(timezone.utc)
                 await send_embed(ctx, f"You need to lay low. You can steal again in **{str(timedelta(seconds=int(remaining.total_seconds())))}**.")
