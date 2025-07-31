@@ -2,7 +2,6 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from bot import main
-from utils.tiktok_service import TikTokService
 
 if __name__ == "__main__":
     # Ensure the .env file is loaded and the bot token is available.

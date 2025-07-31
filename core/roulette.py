@@ -3,7 +3,6 @@ from discord.ext import commands
 import random
 import asyncio
 from typing import Optional, Dict, Any, Union
-from utils.supabase_client import get_user_economy_data, update_user_balance
 from utils.helpers import *
 
 # --- Roulette Game Constants ---
@@ -96,12 +95,12 @@ class RouletteGame:
         elif self.bet_type == "dozen":
             if winning_number != 0 and (self.bet_choice - 1) * 12 < winning_number <= self.bet_choice * 12:
                 return self.bet * PAYOUTS["dozen"]
-        elif self.bet_type == "rpw":
+        elif self.bet_type == "row":
             # Row 1 numbers are 1 mod 3
             # Row 2 numbers are 2 mod 3
             # Row 3 numbers are 0 mod 3
             if winning_number != 0 and winning_number % 3 == self.bet_choice % 3:
-                return self.bet * PAYOUTS["column"]
+                return self.bet * PAYOUTS["row"]
         
         return -self.bet
 
@@ -185,114 +184,3 @@ class RouletteView(discord.ui.View):
                 self.active_games.pop(self.player_id)
         if self.message:
             await self.message.edit(view=None)
-
-class RouletteCog(commands.Cog, name="Roulette"):
-    """Commands for playing roulette."""
-    def __init__(self, bot: commands.Bot) -> None:
-        self.bot = bot
-        self.active_games: Dict[int, Optional[discord.Message]] = {}
-
-    @commands.command(name='roulette', aliases=['r'])
-    @guild_only()
-    @in_allowed_channels()
-    async def roulette(self, ctx: commands.Context, *, bet_str: str):
-        """Starts a game of roulette."""
-        assert ctx.guild is not None
-        user_id = ctx.author.id
-
-        if user_id in self.active_games:
-            await send_embed(ctx, f"You are already in a roulette game! Please finish your [current game]({self.active_games[user_id].jump_url}) before starting another.") # type: ignore
-            return
-
-        try:
-            user_data = await get_user_economy_data(ctx.guild.id, user_id)
-            balance = user_data.get('balance', 0)
-
-            try:
-                bet = await amount_str_to_int(bet_str, balance, ctx)
-            except commands.BadArgument:
-                return
-
-            if bet <= 0:
-                await send_embed(ctx, "Bet must be a positive amount.")
-                return
-            if bet > balance:
-                formatted_balance = await format_currency(ctx.guild.id, balance)
-                await send_embed(ctx, f"You don't have enough to bet that much. Your balance is {formatted_balance}.")
-                return
-
-            view = RouletteView(ctx.author, self.bot, active_games=self.active_games)
-            board_display = create_roulette_board()
-            game_message = await ctx.send(f"Place your bet:\n{board_display}", view=view)
-            view.message = game_message
-            self.active_games[user_id] = game_message
-
-
-            await view.wait()
-
-            if view.bet_type is None:
-                if user_id in self.active_games:
-                    self.active_games.pop(user_id)
-                return
-
-            game = RouletteGame(user_id, bet, view.bet_type, view.bet_choice)
-            result = game.spin()
-            winnings = game.get_winnings(result)
-            
-            await update_user_balance(ctx.guild.id, user_id, winnings, "roulette_game", "BOT")
-
-            # --- Emoji Bet Display ---
-            bet_display = ""
-            if view.bet_type == "single":
-                bet_display = f"Single Number: {format_number_with_emojis(view.bet_choice)}"
-            elif view.bet_type == "color":
-                color_emoji = "🟥" if view.bet_choice == "red" else "⬛"
-                bet_display = f"Color: {color_emoji}"
-            elif view.bet_type == "parity":
-                parity_emoji = "✌️" if view.bet_choice == "even" else "☝️"
-                bet_display = f"Parity: {parity_emoji}"
-            elif view.bet_type == "dozen":
-                dozen_emoji = f"#️⃣ + {format_number_with_emojis(view.bet_choice)}"
-                bet_display = f"Dozen {dozen_emoji}"
-            elif view.bet_type == "row":
-                row_emoji = f"®️ + {format_number_with_emojis(view.bet_choice)}"
-                bet_display = f"Row {row_emoji}"
-
-
-            color = await get_embed_color(ctx.guild.id)
-            embed = discord.Embed(title="Roulette Results", color=color)
-            winning_color_emoji = "🟥" if result['color'] == "red" else "⬛" if result['color'] == "black" else "🟩"
-            
-            winning_row = (int(result['number']) % 3)
-            if winning_row == 0:
-                winning_row = 3
-            winning_row_emoji = f"®️{format_number_with_emojis(winning_row)}"
-            winning_dozen_emoji = f"#️⃣{format_number_with_emojis(int(result['number'])// 12 + 1)}"
-            winning_number_display = format_number_with_emojis(int(result['number']))
-            
-            embed.add_field(name="Winning Number", value=f"{winning_color_emoji} {winning_number_display} ({winning_row_emoji}, {winning_dozen_emoji})")
-            embed.add_field(name="Your Bet", value=bet_display, inline=False)
-            
-            if winnings > 0:
-                formatted_winnings = await format_currency(ctx.guild.id, winnings)
-                embed.description = f"Congratulations! You won {formatted_winnings}!"
-                action = "won"
-            else:
-                formatted_loss = await format_currency(ctx.guild.id, abs(winnings))
-                embed.description = f"Sorry, you lost {formatted_loss}."
-                action = "loss"
-
-            embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
-            await game_message.edit(embed=embed, view=None)
-
-            if log_channel_id := (await get_server_config(ctx.guild.id))['economy'].get('log_channel'):
-                await post_money_log(self.bot, ctx.guild.id, log_channel_id, f"roulette_{action}", winnings, "BOT", user_id)
-
-        finally:
-            if user_id in self.active_games:
-                self.active_games.pop(user_id)
-
-
-async def setup(bot: commands.Bot) -> None:
-    """Sets up the Roulette cog by adding it to the bot."""
-    await bot.add_cog(RouletteCog(bot))

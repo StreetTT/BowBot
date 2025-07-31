@@ -3,7 +3,7 @@ from discord.ext import commands
 from utils.supabase_client import get_server_config
 from typing import Optional, List, Union, Any
 import random
-from utils.tiktok_service import TikTokService
+from core.tiktok import TikTokService
 from config import get_logger
 
 log = get_logger()
@@ -140,7 +140,7 @@ async def format_currency(guild_id: int, amount: int, include_name: bool = False
     # Return the formatted string. Bold the symbol and amount.
     return f"**{symbol}{amount}**{(' ' + name) if include_name else ''}"
 
-async def send_embed(ctx: commands.Context, description: str, title: Optional[str] = None, user_for_image: Optional[Union[discord.Member, discord.User]] = None) -> None:
+async def send_embed(ctx: commands.Context, description: str, title: Optional[str] = None, image_url: Optional[str] = None) -> None:
     """
     Sends a standardized embed message to the context's channel.
     Automatically applies the guild's configured embed color.
@@ -153,9 +153,8 @@ async def send_embed(ctx: commands.Context, description: str, title: Optional[st
     assert ctx.guild is not None
     color = await get_embed_color(ctx.guild.id)
     embed = discord.Embed(description=description, color=color)
-    embed.set_thumbnail(
-        url=ctx.author.display_avatar.url if user_for_image is None else user_for_image.display_avatar.url
-    )
+    if image_url is not None:
+        embed.set_thumbnail(url=image_url)
     embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
     if title:
         embed.title = title

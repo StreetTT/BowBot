@@ -147,14 +147,12 @@ class EconomyCog(commands.Cog, name="Economy"):
                 if not (str(e) == "Member not found."):
                     raise  # re-raise unexpected exceptions
                     
-
-
         # Fetch economy data for the specified user. `get_user_economy_data` usually creates data if none
         user_data = await get_user_economy_data(ctx.guild.id, member.id)
         balance_val = user_data.get('balance', 0)
         
         formatted_bal = await format_currency(ctx.guild.id, balance_val)
-        await send_embed(ctx, f"**{member.display_name}**'s balance is {formatted_bal}.", user_for_image=member)
+        await send_embed(ctx, f"{member.mention}'s balance is {formatted_bal}.", image_url=member.display_avatar.url)
 
     @commands.command(name='leaderboard', aliases=['lb'])
     @guild_only()
@@ -277,7 +275,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             target_balance = target_data.get('balance', 0)
             if target_balance < 1:
                 # Cannot steal if target has no money.
-                await send_embed(ctx, f"**{member.mention}** has no money to steal!")
+                await send_embed(ctx, f"**{member.mention}** has no money to steal!", image_url=member.display_avatar.url)
 
                 if log_channel_id := eco_config.get('log_channel'):
                     await post_money_log(self.bot, guild_id, log_channel_id, "steal_denied", 0, "USER", user_id, member.id)
@@ -290,7 +288,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             await update_user_balance(guild_id, member.id, -amount_stolen, "stolen_from", "USER", user_id)
 
             formatted_stolen = await format_currency(guild_id, amount_stolen)
-            await send_embed(ctx, f"Success! You stole {formatted_stolen} from **{member.mention}**.")
+            await send_embed(ctx, f"Success! You stole {formatted_stolen} from **{member.mention}**.", image_url=member.display_avatar.url)
             if log_channel_id := eco_config.get('log_channel'):
                 await post_money_log(self.bot, guild_id, log_channel_id, "steal_success", amount_stolen, "USER", user_id, member.id)
                 await post_money_log(self.bot, guild_id, log_channel_id, "stolen_from", -amount_stolen, "USER", member.id, user_id)
@@ -359,7 +357,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         await update_user_balance(guild_id, member.id, amount_given, "given_to", "USER", user_id)
 
         formatted_given = await format_currency(guild_id, amount_given)
-        await send_embed(ctx, f"Success! You gave {formatted_given} to **{member.mention}**.")
+        await send_embed(ctx, f"Success! You gave {formatted_given} to **{member.mention}**.", image_url=member.display_avatar.url)
 
         config = await get_server_config(guild_id)
         eco_config = config['economy']
@@ -409,6 +407,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             ),
             color=await get_embed_color(ctx.guild.id)
         )
+        embed.set_thumbnail(url=ctx.guild.icon.url if ctx.guild.icon else ctx.bot.user.display_avatar.url)
         embed.set_footer(text="This code expires in 1 hour.")
         dm_message = await ctx.author.send(embed=embed)
         await send_embed(ctx,f"{ctx.author.mention}, I've sent you a [DM]({dm_message.jump_url}) with instructions on how to verify your account.")

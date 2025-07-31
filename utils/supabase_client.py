@@ -438,7 +438,7 @@ async def update_server_config(guild_id: int, data: Dict[str, Any]) -> None:
 
     if update_data:
         update_data["guild_id"] = str(guild_id)
-        update("server_configs", update_data)
+        update("server_configs", update_data, {"guild_id": guild_id})
 
 async def get_user_economy_data(guild_id: int, user_id: int) -> EconomyData:
     """Fetches a user's economy data, creating a default entry if it doesn't exist.
@@ -544,7 +544,7 @@ async def update_user_economy(guild_id: int, user_id: int, data: Dict[str, Any])
             update_data[key] = value
     
     if update_data:
-        update("economy", update_data)
+        update("economy", update_data, {"guild_id": guild_id, "user_id": user_id})
 
 async def update_user_balance(guild_id: int, user_id: int, change: int, action: str, type: Literal["BOT", "USER", "TIKTOK"], target_user_id: Optional[int] = None) -> int:
     """Updates a user's balance and logs the transaction.
