@@ -68,7 +68,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
                 current_channels.append(channel_id_str)
                 feedback = f"Added {channel.mention} to the allowed channels."
                 
-        await update_server_config(ctx.guild.id, allowed_channels=current_channels)
+        await update_server_config(ctx.guild.id, {"allowed_channels":current_channels})
         await send_embed(ctx, feedback)
         if log_channel_id := old_config.get("config_log"):
             await post_config_log(self.bot, 
@@ -119,7 +119,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
                 current_channels.append(channel_id_str)
                 feedback = f"Added {channel.mention} to the allowed moneydrop channels."
 
-        await update_server_config(ctx.guild.id, moneydrop={"allowed_channels": current_channels})
+        await update_server_config(ctx.guild.id, {"moneydrop":{"allowed_channels": current_channels}})
         await send_embed(ctx, feedback)
         if log_channel_id := old_config.get("config_log"):
             await post_config_log(self.bot, 
@@ -154,7 +154,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
                 channel = channel_args
             feedback = f"Set {channel.mention} to the update log channel."
 
-        await update_server_config(ctx.guild.id, update_log=str(channel.id) if channel else None)
+        await update_server_config(ctx.guild.id, {"update_log":str(channel.id) if channel else None})
         await send_embed(ctx, feedback)
         if log_channel_id := old_config.get("config_log"):
             await post_config_log(self.bot, 
@@ -189,7 +189,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
                 channel = channel_args
             feedback = f"Set {channel.mention} to the configuration log channel."
 
-        await update_server_config(ctx.guild.id, config_log=str(channel.id) if channel else None)
+        await update_server_config(ctx.guild.id, {"config_log": str(channel.id) if channel else None})
         await send_embed(ctx, feedback)
         if channel:
             await post_config_log(self.bot, 
@@ -224,7 +224,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
                 channel = channel_args
             feedback = f"Set {channel.mention} to the money log channel."
 
-        await update_server_config(ctx.guild.id, economy={"log_channel": str(channel.id) if channel else None})
+        await update_server_config(ctx.guild.id, {"economy":{"log_channel": str(channel.id) if channel else None}})
         await send_embed(ctx, feedback)
         if log_channel_id := old_config.get("config_log"):
             await post_config_log(self.bot, 
@@ -249,7 +249,7 @@ class ConfigCog(commands.Cog, name="Configuration"):
             tiktok_username = user_data["tiktok"]["username"]
 
             # Use your existing update_server_config function to set the new field
-            await update_server_config(ctx.guild.id, streamer=ctx.author.id)
+            await update_server_config(ctx.guild.id, {"streamer":ctx.author.id})
             await send_embed(ctx, f"✅ **TikTok Stream Updated!** This server will now monitor events for the user **@{tiktok_username}**.")
             if log_channel_id := old_config.get("config_log"):
                 await post_config_log(self.bot, 
@@ -317,7 +317,7 @@ class ConfigMainMenuView(discord.ui.View):
             embed.add_field(name="Channels", value=get_allowed_str(self.bot, drop.get("allowed_channels", [])), inline=False)
         else:
             embed = discord.Embed(title="Configuration", description="Invalid section.", color=color)
-        embed.set_footer(text=self.ctx.author.display_name, icon_url=self.ctx.author.avatar.url if self.ctx.author.avatar else None)    
+        embed.set_footer(text=self.ctx.author.display_name, icon_url=self.ctx.author.display_avatar.url if self.ctx.author.avatar else None)    
         return embed
 
     @discord.ui.button(label="General", style=discord.ButtonStyle.primary, custom_id="config:general")
@@ -402,7 +402,7 @@ class GeneralSettingsModal(discord.ui.Modal, title="Edit General Settings"):
             await interaction.response.send_message(f"Invalid input: {e}", ephemeral=True)
             return
         
-        await update_server_config(self.ctx.guild.id, prefix=self.prefix.value, embed_color=self.embed_color.value)
+        await update_server_config(self.ctx.guild.id, {"prefix": self.prefix.value, "embed_color": self.embed_color.value})
         await interaction.response.send_message("General settings updated!", ephemeral=True)
         
         embed = await self.parent_view.update_embed("general")
@@ -461,7 +461,7 @@ class CurrencySettingsModal(discord.ui.Modal, title="Edit Currency Settings"):
             "currency_symbol": self.currency_symbol.value,
             "starting_balance": starting_balance
         }
-        await update_server_config(self.ctx.guild.id, economy=economy_settings)
+        await update_server_config(self.ctx.guild.id, {"economy": economy_settings})
         await interaction.response.send_message("Currency settings updated!", ephemeral=True)
 
         embed = await self.parent_view.update_embed("currency")
@@ -528,7 +528,7 @@ class WorkSettingsModal(discord.ui.Modal, title="Edit Work Settings"):
             "work_min_amount": work_min_amount,
             "work_max_amount": work_max_amount
         }
-        await update_server_config(self.ctx.guild.id, economy=economy_settings)
+        await update_server_config(self.ctx.guild.id, {"economy": economy_settings})
         await interaction.response.send_message("Work settings updated!", ephemeral=True)
         
         embed = await self.parent_view.update_embed("work")
@@ -611,7 +611,7 @@ class StealSettingsModal(discord.ui.Modal, title="Edit Steal Settings"):
             "steal_penalty": steal_penalty,
             "steal_max_percentage": steal_max_percentage
         }
-        await update_server_config(self.ctx.guild.id, economy=economy_settings)
+        await update_server_config(self.ctx.guild.id, {"economy": economy_settings})
         await interaction.response.send_message("Steal settings updated!", ephemeral=True)
 
         embed = await self.parent_view.update_embed("steal")
@@ -689,7 +689,7 @@ class MoneyDropSettingsModal(discord.ui.Modal, title="Edit Money Drop Settings")
             "min_amount": min_amount,
             "max_amount": max_amount
         }
-        await update_server_config(self.ctx.guild.id, moneydrop=moneydrop_settings)
+        await update_server_config(self.ctx.guild.id, {"moneydrop": moneydrop_settings})
         await interaction.response.send_message("Money Drop settings updated!", ephemeral=True)
 
         embed = await self.parent_view.update_embed("moneydrop")

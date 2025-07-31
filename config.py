@@ -35,24 +35,46 @@ class Config:
 # Create a singleton instance of the Config class.
 config = Config()
 
-def get_logger() -> logging.Logger:
-    log_formatter = logging.Formatter('%(asctime)s %(levelname)s %(funcName)s(%(lineno)d) %(message)s')
-    log_file = 'bot.log'
+def get_logger(name: str = "BowBot") -> logging.Logger:
+    """
+    Configures and retrieves a logger instance.
 
-    # Setup file handler
-    file_handler = RotatingFileHandler(
-        log_file, mode='a', maxBytes=5*1024*1024, # Max 5 MB per log file.
-        backupCount=2, encoding='utf-8', delay=False # Keep 2 backup files, UTF-8 encoding.
-    )
-    file_handler.setFormatter(log_formatter)
+    This function sets up a root logger with both a file and console handler
+    on its first call. Subsequent calls will return a logger instance
+    that inherits this configuration, preventing duplicate handlers and log messages.
 
-    # Setup console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(log_formatter)
+    Args:
+        name (str): The name for the logger, typically __name__ from the calling module.
 
-    # Get the root logger
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+    Returns:
+        logging.Logger: A configured logger instance.
+    """
+    logger = logging.getLogger(name)
+
+    # Check if the root logger has already been configured to avoid duplicate handlers
+    if not logging.getLogger().hasHandlers():
+        # Set the level for the root logger to the lowest level of its handlers
+        logging.getLogger().setLevel(logging.DEBUG)
+
+        # Use a more informative log format
+        log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(funcName)s(%(lineno)d) - %(message)s')
+        log_file = 'bot.log'
+
+        # Setup file handler
+        file_handler = RotatingFileHandler(
+            log_file, mode='a', maxBytes=5*1024*1024,  # Max 5 MB per log file
+            backupCount=2, encoding='utf-8', delay=False  # Keep 2 backup files
+        )
+        file_handler.setFormatter(log_formatter)
+        file_handler.setLevel(logging.DEBUG)
+
+        # Setup console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(log_formatter)
+        console_handler.setLevel(logging.INFO)
+
+        # Add handlers to the root logger
+        logging.getLogger().addHandler(file_handler)
+        logging.getLogger().addHandler(console_handler)
+
     return logger

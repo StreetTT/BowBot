@@ -81,7 +81,7 @@ async def post_config_log(bot: commands.Bot, guild_id: int, log_channel_id: Unio
     embed.add_field(name="New Value", value=setting_format(new_value), inline=True)
     
     embed.set_footer(text=f"Changed by: {changed_by.display_name} | Method: {method} | Date: {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')}", 
-                     icon_url=changed_by.avatar.url if changed_by.avatar else None
+                     icon_url=changed_by.display_avatar.url
     )
     await log_channel.send(embed=embed)
 
@@ -140,7 +140,7 @@ async def format_currency(guild_id: int, amount: int, include_name: bool = False
     # Return the formatted string. Bold the symbol and amount.
     return f"**{symbol}{amount}**{(' ' + name) if include_name else ''}"
 
-async def send_embed(ctx: commands.Context, description: str, title: Optional[str] = None) -> None:
+async def send_embed(ctx: commands.Context, description: str, title: Optional[str] = None, user_for_image: Optional[Union[discord.Member, discord.User]] = None) -> None:
     """
     Sends a standardized embed message to the context's channel.
     Automatically applies the guild's configured embed color.
@@ -153,7 +153,10 @@ async def send_embed(ctx: commands.Context, description: str, title: Optional[st
     assert ctx.guild is not None
     color = await get_embed_color(ctx.guild.id)
     embed = discord.Embed(description=description, color=color)
-    embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+    embed.set_thumbnail(
+        url=ctx.author.display_avatar.url if user_for_image is None else user_for_image.display_avatar.url
+    )
+    embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
     if title:
         embed.title = title
     # Send the embed message to the channel where the command was invoked.

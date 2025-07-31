@@ -35,6 +35,7 @@ def format_number_with_emojis(number: int) -> str:
     return "".join(emoji_map.get(digit, digit) for digit in num_str)
 
 def create_roulette_board() -> str:
+    # TODO: Create Roulette Board Img
     """Creates a string representation of the roulette board with emojis."""
     red_square = '🟥'
     black_square = '⬛'
@@ -200,7 +201,7 @@ class RouletteCog(commands.Cog, name="Roulette"):
         user_id = ctx.author.id
 
         if user_id in self.active_games:
-            await send_embed(ctx, "You are already in a roulette game! Please finish it before starting another.")
+            await send_embed(ctx, f"You are already in a roulette game! Please finish your [current game]({self.active_games[user_id].jump_url}) before starting another.") # type: ignore
             return
 
         try:
@@ -281,6 +282,7 @@ class RouletteCog(commands.Cog, name="Roulette"):
                 embed.description = f"Sorry, you lost {formatted_loss}."
                 action = "loss"
 
+            embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
             await game_message.edit(embed=embed, view=None)
 
             if log_channel_id := (await get_server_config(ctx.guild.id))['economy'].get('log_channel'):

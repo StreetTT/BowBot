@@ -2,6 +2,7 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from bot import main
+from utils.tiktok_service import TikTokService
 
 if __name__ == "__main__":
     # Ensure the .env file is loaded and the bot token is available.
@@ -13,14 +14,14 @@ if __name__ == "__main__":
     # This is the entry point for the entire bot application.
     asyncio.run(main())
 
-    # TODO: Roulette
-    # TODO: MI5 ( 007 Roles)
-    # TODO: PvP
-    # TODO: Family Tree
-    # TODO: Bank of Bow : 100K per person (More ways to lose money)
-    # TODO: TikFinity Link
-    # TODO: Shop: Roles, Chat, multipliers
     # TODO: Chat Revive
+    #FIXME: You shouldn't be able to play blackjack and roulette at the same time
+    # TODO: Bank of Bow : 100K per person (More ways to lose money)
+    # TODO: MI5 ( 007 Roles)
+    # TODO: TikFinity Link
+    # TODO: Factions (political parties)
+    # TODO: PvP
+    # TODO: Shop: Roles, Chat, multipliers
     # TODO: Invite Link
     # TODO: Edit About
     # TODO: Recent Transaction Log

@@ -41,8 +41,8 @@ async def on_ready() -> None:
     """
     if bot.user is not None:
         logger.info(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
-        logger.info('Performing retroactive setup for guilds and members...')
-        await retroactive_setup()
+        # logger.info('Performing retroactive setup for guilds and members...')
+        # await retroactive_setup()
         logger.info("Setup complete.")
 
 async def retroactive_setup() -> None:

@@ -52,7 +52,7 @@ class OwnerCog(commands.Cog, name="Owner"):
                 description = parts[1].strip()
             embed.add_field(name=title, value=description, inline=False)
 
-        embed.set_footer(text=f"Version: {version}", icon_url=ctx.bot.user.avatar.url if ctx.bot.user.avatar else None)
+        embed.set_footer(text=f"Version: {version}", icon_url=ctx.bot.user.display_avatar.url)
 
         await send_embed_to_feed(self.bot, embed)
 

@@ -6,6 +6,8 @@ from typing import Optional, List, Dict, Any, Union, Set
 from utils.supabase_client import get_user_economy_data, update_user_balance
 from utils.helpers import *
 
+#FIXME: You shouldn't be able to play blackjack and roulette at the same time
+
 class BlackjackGame:
     """
     Represents a single game of blackjack between a player and the dealer.
@@ -199,11 +201,8 @@ class BlackjackCog(commands.Cog, name="Blackjack"):
                 dealer_value = game.get_hand_value(game.dealer_hand)
                 embed.add_field(name=f"Dealer's Hand ({dealer_value if game_over else '?'})", value=dealer_hand_str, inline=False)
 
-                # Add footer instructions if the game is ongoing.
-                if not game_over:
-                    embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
-
                 # Edit the existing message or send a new one.
+                embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
                 if game_message:
                     await game_message.edit(embed=embed, view=view)
                     return game_message

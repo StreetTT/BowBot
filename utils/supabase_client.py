@@ -1,12 +1,11 @@
 from supabase import create_client, Client
 from config import config
 from datetime import datetime, timezone
-from typing import TypedDict, List, Optional, Literal, Any, Dict, cast
+from typing import TypedDict, List, Optional, Literal, Any, Dict, cast, Tuple, Union
 from copy import deepcopy
 from config import get_logger
 
-# --- Type Definitions ---
-# These TypedDicts define the expected structure of data stored in Supabase tables.
+# Type Definitions 
 
 class MoneyDropConfig(TypedDict):
     """Settings for the random money drop feature."""
@@ -73,13 +72,17 @@ class EconomyLog(TypedDict):
     target_user_id: Optional[str]  # Optional: User ID targeted by the action (e.g., in steal).
     timestamp: str                 # Timestamp of the transaction (ISO format string).
 
-# Initialize the Supabase client using credentials from the `config` object.
-# This client instance is used for all database operations.
-supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
+class CachedData(TypedDict):
+    updated_at: datetime
+    data: Dict[str, Any]
 
-# --- Default Values ---
-# Define the default economy configuration.
-# This ensures consistency for new servers and provides a fallback for missing settings.
+# Global Variables 
+
+supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
+logger = get_logger()
+
+# Default Values 
+
 DEFAULT_MONEY_DROP_CONFIG: MoneyDropConfig = {
     "enabled": False,
     "chance": 0.05, # 5% chance per message for a money drop.
@@ -108,17 +111,28 @@ DEFAULT_TIKTOK_DATA: TikTokData = {
     "link": None
 }
 
+SERVER_CONFIG_CACHE: Dict[str, CachedData] = {}
+ECONOMY_CACHE: Dict[Tuple[str, str], CachedData] = {}
+TTL = 60 * 10
+
+# General Functions 
+
 def deep_merge(source: Dict[str, Any], destination: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Recursively merges two dictionaries.
-    Updates `destination` with values from `source`. If a key exists in both and its value
-    is a dictionary, the merge is applied recursively to that nested dictionary.
-    This is useful for applying default configurations while preserving existing custom settings.
+    """Recursively merges two dictionaries.
+    
+    Updates `destination` with values from `source`. If a key exists in both and its 
+    value is a dictionary, the merge is applied recursively to that nested dictionary.
+
+    Args:
+        source (Dict[str, Any]): The dictionary with data to merge from.
+        destination (Dict[str, Any]): The dictionary to merge into.
+
+    Returns:
+        Dict[str, Any]: The merged destination dictionary.
     """
     for key, value in source.items():
         if isinstance(value, dict):
-            # If the value is a dictionary, create or get the nested dictionary in destination
-            # and recursively merge.
+            # If the value is a dictionary, create or get the nested dictionary in destination and recursively merge.
             node = destination.setdefault(key, {})
             deep_merge(value, node)
         else:
@@ -126,56 +140,290 @@ def deep_merge(source: Dict[str, Any], destination: Dict[str, Any]) -> Dict[str,
             destination[key] = value
     return destination
 
-async def get_server_config(guild_id: int) -> ServerConfig:
-    """
-    Fetches the server's configuration from Supabase.
-    If no configuration is found for the guild, a new default entry is created and returned.
-    This function ensures that every guild the bot is in has a valid configuration.
-    """
-    # Query the 'server_configs' table for the specific guild_id.
-    # `maybe_single()` attempts to return a single record or None.
-    response = supabase.table('server_configs').select("*").eq('guild_id', str(guild_id)).maybe_single().execute()
+def determine_cache(table: str, data: Dict[Any, Any] = {}) -> Union[Tuple[Dict[str, CachedData], Optional[str]], Tuple[Dict[Tuple[str, str], CachedData], Optional[Tuple[str, str]]]]:
+    """Determines the appropriate cache and cache key for a given table and data.
 
-    if response and response.data:
-        data = response.data
-        # Create a deep copy of the default economy config to preserve it.
-        full_eco_config = deepcopy(DEFAULT_ECONOMY_CONFIG)
-        # This allows partial updates.
-        if 'economy' in data and isinstance(data['economy'], dict):
-            deep_merge(cast(Dict[str, Any], data['economy']), cast(Dict[str, Any], full_eco_config))
+    Args:
+        table (str): The name of the table, must be 'server_configs' or 'economy'.
+        data (Dict[Any, Any], optional): Dictionary containing identifiers like 
+            'guild_id' and 'user_id'. Defaults to {}.
 
-        data['economy'] = full_eco_config # Update the economy part of the config.
-        return cast(ServerConfig, data) # Cast the result to ServerConfig TypedDict.
+    Raises:
+        ValueError: If the table name is not 'server_configs' or 'economy'.
+
+    Returns:
+        Union[Tuple[Dict[str, CachedData], Optional[int]], Tuple[Dict[Tuple[str, str], CachedData], Optional[Tuple[int, int]]]]: 
+            A tuple containing the appropriate cache and the cache key.
+              
+    """
+    if table not in ("server_configs", "economy"):  
+        logger.warning(f"Invalid table '{table}' for caching.")
+        raise ValueError(f"Invalid table '{table}' for caching.")
+    
+    if (table == "server_configs"): 
+        return cast(Dict[str, CachedData], SERVER_CONFIG_CACHE), str(data.get("guild_id"))
     else:
-        # If no configuration is found, create a new default configuration.
-        new_config: ServerConfig = {
+        cache_key = (str(data["guild_id"]), str(data["user_id"])) if data.get("user_id") and data.get("guild_id") else None
+        return cast(Dict[Tuple[str, str], CachedData],ECONOMY_CACHE), cache_key
+
+# Cache CUD 
+
+def cache_upsert(table: str, data: Dict[Any, Any] = {}) -> None:
+    """Upserts (updates or inserts) data into the appropriate cache.
+
+    Args:
+        table (str): The name of the table to cache data for.
+        data (Dict[Any, Any], optional): The data record to be cached. Defaults to {}.
+    """
+    try:
+        cache, cache_key = determine_cache(table, data)
+    except ValueError as e:
+        return
+
+    if cache_key:
+        logger.debug(f"Upserting to cache for table '{table}' with key '{cache_key}'.")
+        cache[cache_key] = {"updated_at": datetime.now(timezone.utc), "data": data} # type: ignore
+    else:
+        logger.debug(f"Cache miss for table '{table}'.")
+
+
+def cache_retrieve(table: str, conditions:Dict[Any, Any]) -> Optional[List[Dict[str, Any]]]:
+    """Retrieves data from the cache if it exists and is not expired.
+
+    Args:
+        table (str): The name of the table to retrieve from.
+        conditions (Dict[Any, Any]): The conditions to find the data in the cache, 
+            e.g., {'guild_id': 123}.
+
+    Returns:
+        Optional[List[Dict[str, Any]]]: A list containing the cached data dictionary, 
+                                        or None if not found or expired.
+    """
+    try:
+        cache, cache_key = determine_cache(table, conditions)
+    except ValueError as e:
+        return
+    
+    if cache_key and cache_key in cache:
+        if (datetime.now(timezone.utc) - cache[cache_key]["updated_at"]).total_seconds() < TTL: # type: ignore
+            logger.debug(f"Retrieved from cache for table '{table}' with key '{cache_key}'.")
+            return [cache[cache_key]["data"]] # type: ignore
+        else:
+            logger.debug(f"Cache expired for table '{table}' with key '{cache_key}'.")
+    else:
+        logger.debug(f"Cache miss for table '{table}'.")
+    return 
+    
+def cache_delete(table: str, conditions: Dict[Any, Any] = {}) -> None:
+    """Deletes an entry from the cache based on the provided conditions.
+
+    Args:
+        table (str): The name of the table associated with the cache.
+        conditions (Dict[Any, Any], optional): The conditions to identify the cache 
+            entry to delete. Defaults to {}.
+    """
+    try:
+        cache, cache_key = determine_cache(table, conditions)
+    except ValueError as e:
+        return
+
+    if cache_key and cache_key in cache:
+        logger.debug(f"Deleting from cache for table '{table}' with key '{cache_key}'.")
+        cache.pop(cache_key) # type: ignore
+    else:
+        logger.debug(f"Cache miss for table '{table}'.")
+
+# Supabase CRUD 
+
+def create(table: str, data: Dict[Any, Any] = {}) -> None:
+    """Creates a new record in a Supabase table and adds it to the cache.
+
+    Args:
+        table (str): The name of the Supabase table.
+        data (Dict[Any, Any], optional): The data for the new record. Defaults to {}.
+
+    Raises:
+        Exception: If the database transaction fails.
+    """
+    logger.debug(f"Creating in Supabase for table '{table}'.")
+    # Attempt to save in supabase
+    try:
+        supabase.table(table).insert(data).execute()
+        logger.info(f"Successfully created record in table '{table}'.")
+    except Exception as e:
+        logger.error(f"Failed to create record in table '{table}': {e}", exc_info=True)
+        raise Exception(f"Failed to save user information in {table}: {e}")
+    
+    # Attempt to save in cache
+    cache_upsert(table, data)
+    
+
+def retrieve(table: str, conditions:Dict[Any, Any] = {}) -> List[Dict[Any, Any]]:
+    """Retrieves records from a Supabase table, utilizing the cache first.
+
+    If data is not in the cache or is expired, it fetches from Supabase, 
+    then updates the cache.
+
+    Args:
+        table (str): The name of the Supabase table.
+        conditions (Dict[Any, Any], optional): A dictionary of conditions to filter 
+            the query (e.g., {'guild_id': 123}). Defaults to {}.
+
+    Raises:
+        Exception: If the database transaction fails.
+
+    Returns:
+        List[Dict[Any, Any]]: A list of dictionaries representing the retrieved records.
+    """
+    # Attempt to retrieve from cache
+    data = cache_retrieve(table, conditions)
+    if data:
+        return data
+    
+    logger.debug(f"Fetching from Supabase in table '{table}' with conditions: {conditions}")
+    # Attempt to fetch from supabase
+    try:
+        query = supabase.table(table).select("*")
+        for key, value in conditions.items():
+            query = query.eq(key, value)
+        response = query.execute()
+        data = response.data
+        logger.info(f"Successfully retrieved records from table '{table}'.")
+    except Exception as e:
+        logger.error(f"Failed to retrieve records from table '{table}' with conditions {conditions}: {e}", exc_info=True)
+        raise Exception(f"Failed to retrieve records from {table}: {e}")
+    
+    for record in data:
+        # Attempt to save in cache
+        cache_upsert(table, record)
+    
+    return data if data else []
+
+
+def update(table: str, attributes: Dict[Any, Any] = {}, conditions: Dict[Any, Any] = {}) -> None:
+    """Updates records in a Supabase table and refreshes the corresponding cache entries.
+
+    Args:
+        table (str): The name of the Supabase table.
+        attributes (Dict[Any, Any], optional): A dictionary of the fields to update. 
+            Defaults to {}.
+        conditions (Dict[Any, Any], optional): A dictionary of conditions to filter which 
+            records to update. Defaults to {}.
+
+    Raises:
+        Exception: If the database update fails.
+    """
+    logger.debug(f"Updating in Supabase for table '{table}' with conditions: {conditions}")
+    # Attempt to update supabase
+    try:
+        query = supabase.table(table).update(attributes)
+        for key, value in conditions.items():
+            query = query.eq(key, value)
+        query.execute()
+        logger.info(f"Successfully updated record in table '{table}'.")
+    except Exception as e:
+        logger.error(f"Failed to update records in table '{table}' with conditions {conditions}: {e}", exc_info=True)
+        raise Exception(f"Failed to update records in {table}: {e}")
+    
+    logger.debug(f"Updating cache for table '{table}' after database update for conditions: {conditions}.")
+    # Retrieve the updated records from Supabase and upsert them into the cache
+    data = []
+    try:
+        query = supabase.table(table).select("*")
+        for key, value in conditions.items():
+            query = query.eq(key, value)
+        response = query.execute()
+        data = response.data
+        if data:
+            for record in data:
+                cache_upsert(table, record)
+        logger.info(f"Successfully updated cache for {len(data)} records in table '{table}'.")
+    except Exception as e:
+        logger.error(f"Cache update after DB update failed for table '{table}' with conditions {conditions}: {e}", exc_info=True)
+        if data:
+            logger.warning(f"Deleting cache entries for table '{table}' due to post-update cache failure. Conditions: {conditions}")
+            for record in data:
+                cache_delete(table, record)
+
+
+def delete(table: str, conditions: Dict[Any, Any] = {}) -> None:
+    """Deletes records from a Supabase table and removes them from the cache.
+
+    Args:
+        table (str): The name of the Supabase table.
+        conditions (Dict[Any, Any], optional): A dictionary of conditions to filter which 
+            records to delete. Defaults to {}.
+
+    Raises:
+        Exception: If the database deletion fails.
+    """
+    logger.debug(f"Deleting from Supabase for table '{table}' with conditions: {conditions}")
+    try:
+        query = supabase.table(table).delete()
+        for key, value in conditions.items():
+            query = query.eq(key, value)
+        query.execute()
+        logger.info(f"Successfully deleted from table '{table}' with conditions: {conditions}")
+    except Exception as e:
+        logger.error(f"Failed to delete records from table '{table}' with conditions {conditions}: {e}", exc_info=True)
+        raise Exception(f"Failed to delete records from {table}: {e}")
+    
+    cache_delete(table, conditions)
+
+# BowBot Functions 
+
+async def get_server_config(guild_id: int) -> ServerConfig:
+    """Fetches a server's configuration, creating a default one if it doesn't exist.
+
+    This function ensures that a valid configuration is always available for a guild.
+
+    Args:
+        guild_id (int): The Discord guild ID for which to fetch the configuration.
+
+    Returns:
+        ServerConfig: The server's configuration dictionary.
+    """
+    res = cast(List[ServerConfig], retrieve("server_configs",{"guild_id": guild_id}))
+    
+    if res:
+        data = res[0]
+        logger.debug(f"Found server config for guild_id {guild_id}.")
+    else:
+        logger.info(f"No config found for guild_id {guild_id}. Creating a new default config.")
+        # If no configuration is found, create a new default configuration and insert it into the database
+        data: ServerConfig = {
             "guild_id": str(guild_id),
             "notes": None,
             "prefix": "-",
             "embed_color": "#0000FF",
-            "allowed_channels": [], # Empty list means all channels are allowed by default.
+            "allowed_channels": [],
             "economy": deepcopy(DEFAULT_ECONOMY_CONFIG),
             "moneydrop": deepcopy(DEFAULT_MONEY_DROP_CONFIG),
             "update_log": None,
             "config_log": None,
             "streamer": None
         }
-        # Insert the new default configuration into the 'server_configs' table.
-        supabase.table('server_configs').insert(dict(new_config)).execute()
-        return new_config
+        create("server_configs", cast(Dict, data))
+    
+    return data
 
-async def update_server_config(guild_id: int, **kwargs: Any) -> None:
-    """
-    Updates the server's configuration in Supabase using keyword arguments.
-    Allows for partial updates and handles merging of nested 'economy' settings.
-    Parameters:
-    - `guild_id`: The ID of the guild to update.
-    - `**kwargs`: Keyword arguments representing the fields to update (e.g., `prefix="new!"`).
+async def update_server_config(guild_id: int, data: Dict[str, Any]) -> None:
+    """Updates a server's configuration in Supabase.
+
+    Handles partially updated configurations by performing a deep merge of the existing configuration
+    with the provided data.
+
+    Args:
+        guild_id (int): The ID of the guild to update.
+        data (Dict[str, Any]): A dictionary of fields to update and their new values. Should be a partial dict based on ServerConfig.
     """
     update_data: Dict[str, Any] = {}
+    logger.info(f"Updating server config for guild_id {guild_id}.")
+    logger.debug(f"Data:{data}")
 
-    for key, value in kwargs.items():
+    for key, value in data.items():
         if key in ("economy", "moneydrop"):
+            logger.debug(f"Performing deep merge for '{key}' on guild_id {guild_id}")
             current_config = await get_server_config(guild_id) # Fetch current config to merge changes.
             if key == "economy" and isinstance(value, dict):
                 # If the 'economy' key is being updated, perform a deep merge.
@@ -189,50 +437,104 @@ async def update_server_config(guild_id: int, **kwargs: Any) -> None:
             update_data[key] = value
 
     if update_data:
-        # Perform the update operation in Supabase.
-        supabase.table('server_configs').update(update_data).eq('guild_id', str(guild_id)).execute()
+        update_data["guild_id"] = str(guild_id)
+        update("server_configs", update_data)
 
 async def get_user_economy_data(guild_id: int, user_id: int) -> EconomyData:
-    """
-    Fetches a user's full economy data from Supabase.
-    If an entry for the user doesn't exist, a new one is created with default values.
-    Ensures every active user has an economy profile.
-    """
-    # Query the 'economy' table for the user's data in a specific guild.
-    response = supabase.table('economy').select("*").eq('guild_id', str(guild_id)).eq('user_id', str(user_id)).maybe_single().execute()
-    if response and response.data:
-        return cast(EconomyData, response.data) # Return existing data.
+    """Fetches a user's economy data, creating a default entry if it doesn't exist.
 
-    # If no data found, create a new entry.
-    server_config = await get_server_config(guild_id) # Get starting balance from server config.
-    starting_balance = server_config['economy']['starting_balance']
-    new_user_data: EconomyData = {
-        'guild_id': str(guild_id),
-        'user_id': str(user_id),
-        'balance': starting_balance,
-        'last_work': None,
-        'last_steal': None,
-        'participant': False,
-        'tiktok': DEFAULT_TIKTOK_DATA
-    }
-    # Insert the new user economy data into the 'economy' table.
-    supabase.table('economy').insert(dict(new_user_data)).execute()
-    return new_user_data
+    Ensures every user has an economy profile within a guild.
+
+    Args:
+        guild_id (int): The Discord guild ID.
+        user_id (int): The Discord user ID.
+
+    Returns:
+        EconomyData: The user's economy data dictionary.
+    """
+    res = cast(List[EconomyData], retrieve("economy",{"guild_id": guild_id, "user_id": user_id}))
+    
+    if res:
+        data = res[0]
+        logger.debug(f"Found economy data for user {user_id} in guild {guild_id}.")
+    else:
+        # If no configuration is found, create a new default configuration and insert it into the database
+        logger.info(f"No economy data found for user {user_id} in guild {guild_id}. Creating a new default entry.")
+        server_config = await get_server_config(guild_id) # Get starting balance from server config.
+        starting_balance = server_config['economy']['starting_balance']
+        data: EconomyData = {
+            'guild_id': str(guild_id),
+            'user_id': str(user_id),
+            'balance': starting_balance,
+            'last_work': None,
+            'last_steal': None,
+            'participant': False,
+            'tiktok': DEFAULT_TIKTOK_DATA
+        }
+        create("economy", cast(Dict, data))
+    
+    return data
+
+async def get_multiple_user_economy_data(guild_id: int, user_ids: List[int] = []) -> List[EconomyData]:
+    """Fetches multiple user's economy data. 
+
+    If no user IDs are provided, fetches all users in the guild.
+    
+    Args:
+        guild_id (int): The Discord guild ID.
+        user_ids (List[int]): A list of Discord user IDs.
+    
+    Returns:
+        List[EconomyData]: A list of user's economy data dictionaries.
+    """
+    result: List[EconomyData] = []
+
+    # Get as many user_ids from cache as possible
+    user_ids_to_fetch = set(user_ids)
+    cache_query = {"guild_id": guild_id}
+    if user_ids:
+        for user_id in user_ids: 
+            cache_query.update({"user_id": user_id})
+            users = cache_retrieve("economy", cache_query)
+            if users:
+                result.append(cast(EconomyData, users[0]))
+                user_ids_to_fetch.remove(user_id)
+
+
+    # Fetch remaining user_ids from Supabase
+    if not user_ids or user_ids_to_fetch:
+        res = supabase.table('economy').select("*").eq('guild_id', str(guild_id))
+        if user_ids_to_fetch:
+            res = res.in_('user_id', [str(uid) for uid in user_ids_to_fetch])
+        res = res.execute()
+
+        if res and res.data:
+            logger.info(f"Found {len(res.data)} economy data")
+
+            for row in res.data:
+                cache_upsert("economy", row)
+                result.append(cast(EconomyData, row))
+        return result
+    logger.warning(f"No economy data found for user_ids {user_ids} in guild_id {guild_id}.")
+    return []
 
 async def update_user_economy(guild_id: int, user_id: int, data: Dict[str, Any]) -> None:
-    """
-    Updates specific fields in a user's economy data.
-    Automatically creates the user's entry if it doesn't exist before updating.
-    Parameters:
-    - `guild_id`: The ID of the guild.
-    - `user_id`: The ID of the user.
-    - `data`: A dictionary of fields to update and their new values.
-    """
-    # Call `get_user_economy_data` first to ensure the user's entry exists.
+    """Updates a user's economy data in Supabase.
 
+    Handles partially updated configurations by performing a deep merge of the existing configuration
+    with the provided data.
+
+    Args:
+        guild_id (int): The ID of the guild.
+        user_id (int): The ID of the user.
+        data (Dict[str, Any]): A dictionary of fields to update and their new values.
+    """
+    logger.info(f"Updating user economy for user_id {user_id} in guild_id {guild_id}.")
+    logger.debug(f"Data: {data}")
     update_data: Dict[str, Any] = {}
 
     for key, value in data.items():
+        logger.debug(f"Performing deep merge for '{key}' for user_id {user_id} in guild_id {guild_id}")
         if key == "tiktok" and isinstance(value, dict):
             # If the 'tiktok' key is being updated, perform a deep merge.
             current_config = await get_user_economy_data(guild_id, user_id)
@@ -240,22 +542,30 @@ async def update_user_economy(guild_id: int, user_id: int, data: Dict[str, Any])
             update_data["tiktok"] = deep_merge(value, tiktok_copy)
         else:
             update_data[key] = value
-    supabase.table('economy').update(update_data).eq('guild_id', str(guild_id)).eq('user_id', str(user_id)).execute()
+    
+    if update_data:
+        update("economy", update_data)
 
 async def update_user_balance(guild_id: int, user_id: int, change: int, action: str, type: Literal["BOT", "USER", "TIKTOK"], target_user_id: Optional[int] = None) -> int:
-    """
-    Updates a user's balance and logs the transaction to the 'economy_logs' table.
-    This is the primary function for any balance modification.
-    Parameters:
-    - `guild_id`: The ID of the guild.
-    - `user_id`: The ID of the user whose balance is being updated.
-    - `change`: The amount to add to (positive) or subtract from (negative) the balance.
-    - `action`: A string describing the reason for the balance change (e.g., "work", "steal_success").
-    - `type`: Indicates who initiated the action: "BOT" or "USER".
-    - `target_user_id`: Optional. The ID of another user involved in the transaction (e.g., the target of a steal).
+    """Updates a user's balance and logs the transaction.
+
+    This is the primary function for any balance modification, ensuring data 
+    consistency and logging.
+
+    Args:
+        guild_id (int): The ID of the guild.
+        user_id (int): The ID of the user whose balance is changing.
+        change (int): The amount to add (positive) or subtract (negative).
+        action (str): A string describing the reason for the change (e.g., "work").
+        type (Literal["BOT", "USER", "TIKTOK"]): The initiator of the action.
+        target_user_id (Optional[int], optional): The ID of another user involved in 
+            the transaction (e.g., the target of a steal). Defaults to None.
+
     Returns:
-    - The new balance of the user.
+        int: The user's new balance after the update.
     """
+    logger.info(f"Updating balance for user_id {user_id} in guild_id {guild_id}.")
+    logger.debug (f"Change: {change}, Action: {action}, Type: {type}, Target: {target_user_id}")
     user_data = await get_user_economy_data(guild_id, user_id) # Ensure user exists.
     current_balance = user_data.get('balance', 0)
     new_balance = current_balance + change
@@ -263,37 +573,64 @@ async def update_user_balance(guild_id: int, user_id: int, change: int, action: 
     await update_user_economy(guild_id, user_id, {'balance': new_balance, 'participant': True}) # Update balance in 'economy' table.
     # Log the transaction details.
     await log_economy_action(guild_id, user_id, action, change, type, target_user_id)
+    logger.info(f"New balance for user_id {user_id} in guild_id {guild_id}")
+    logger.debug(f"{current_balance} -> {new_balance}")
     return new_balance
 
 async def log_economy_action(guild_id: int, user_id: int, action: str, amount: int, type: Literal["BOT", "USER", "TIKTOK"], target_user_id: Optional[int] = None) -> None:
+    """Logs an economy transaction to the 'economy_logs' table.
+
+    Provides an audit trail for all currency movements.
+
+    Args:
+        guild_id (int): The guild ID where the transaction occurred.
+        user_id (int): The user ID involved in the transaction.
+        action (str): Description of the action (e.g., "work", "steal_success").
+        amount (int): The amount of currency involved.
+        type (Literal["BOT", "USER", "TIKTOK"]): The initiator of the action.
+        target_user_id (Optional[int], optional): The user ID targeted by the action. 
+            Defaults to None.
+    
+    Raises:
+        Exception: If the database insert operation fails.
     """
-    Logs an economy transaction to the 'economy_logs' table.
-    This provides an audit trail for all currency movements.
-    Includes error handling for logging failures.
-    """
+    data = {
+        "action": action,
+        "amount": amount,
+        "type": type,
+        "target_user_id": str(target_user_id) if target_user_id else None,
+        "guild_id": str(guild_id),
+        "user_id": str(user_id),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    
+    logger.info(f"Logging economy action for guild_id {guild_id}")
+    logger.debug(f"Data: {data}")
     try:
-        supabase.table('economy_logs').insert({
-            'guild_id': str(guild_id),
-            'user_id': str(user_id),
-            'action': action,
-            'amount': amount,
-            'type': type,
-            'target_user_id': str(target_user_id) if target_user_id else None,
-            'timestamp': datetime.now(tz=timezone.utc).isoformat() # Store timestamp in ISO 8601 format with UTC timezone.
-        }).execute()
+        supabase.table('economy_logs').insert(data).execute()
+        logger.info(f"Successfully logged economy action for guild_id {guild_id}.")
     except Exception as e:
-        # Log any errors that occur during the logging process to the bot's log file.
-        get_logger().error(f"Error logging economy action: {e}", exc_info=True)
+        logger.error(f"Failed to log economy action to 'economy_logs' table. Data: {data}. Error: {e}", exc_info=True)
+        raise e
 
 async def get_server_with_update_feed() -> List[ServerConfig]:
+    """Retrieves all server configurations that have an update feed channel set.
+
+    Returns:
+        List[ServerConfig]: A list of server configuration dictionaries for servers 
+                            with a non-null 'update_log' channel.
     """
-    Retrieves the update feed channels from each guild.
-    """
+    logger.info("Fetching all server configs to find update feeds.")
     try:
         response = supabase.table('server_configs').select("*").execute()
         if response and response.data:
-            return [cast(ServerConfig, config) for config in response.data if config["update_log"] is not None]
+            for record in response.data:
+                cache_upsert("server_configs", record)
+            filtered_configs = [cast(ServerConfig, config) for config in response.data if config["update_log"] is not None]
+            logger.info(f"Found {len(filtered_configs)} servers with update feeds.")
+            return filtered_configs
+        logger.info("No server configs found.")
         return []
     except Exception as e:
-        get_logger().error(f"Error fetching bot log channels: {e}", exc_info=True)
+        logger.error(f"Failed to retrieve servers with update feed. Error: {e}", exc_info=True)
         return []

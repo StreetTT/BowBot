@@ -8,7 +8,8 @@ from utils.supabase_client import (
     update_user_balance,
     update_user_economy,
     get_server_config,
-    supabase # Direct Supabase client instance, for raw queries.
+    get_multiple_user_economy_data,
+    EconomyData
 )
 from typing import Optional, List, Union, Dict, Any
 from utils.helpers import *
@@ -20,7 +21,7 @@ class LeaderboardView(discord.ui.View):
     """
     A Discord UI View for the paginated leaderboard, containing navigation buttons.
     """
-    def __init__(self, ctx: commands.Context, all_entries: List[Dict[str, Any]], total_pages: int) -> None:
+    def __init__(self, ctx: commands.Context, all_entries: List[EconomyData], total_pages: int) -> None:
         super().__init__(timeout=120.0)  # Timeout after 2 minutes of inactivity
         self.ctx = ctx
         self.all_entries = all_entries
@@ -79,7 +80,7 @@ class LeaderboardView(discord.ui.View):
 
 
         embed.set_footer(text=f"Requested by {self.ctx.author.display_name} | Page {self.current_page + 1}/{self.total_pages}",
-                         icon_url=self.ctx.author.avatar.url if self.ctx.author.avatar else None
+                         icon_url=self.ctx.author.display_avatar.url if self.ctx.author.avatar else None
         )
         return embed
 
@@ -153,7 +154,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         balance_val = user_data.get('balance', 0)
         
         formatted_bal = await format_currency(ctx.guild.id, balance_val)
-        await send_embed(ctx, f"**{member.display_name}**'s balance is {formatted_bal}.")
+        await send_embed(ctx, f"**{member.display_name}**'s balance is {formatted_bal}.", user_for_image=member)
 
     @commands.command(name='leaderboard', aliases=['lb'])
     @guild_only()
@@ -164,11 +165,8 @@ class EconomyCog(commands.Cog, name="Economy"):
         """
         assert ctx.guild is not None
 
-        # Query Supabase for top 10 users by balance in the current guild.
-        # `.order('balance', desc=True)` sorts by balance in descending order.
-        # `.eq('participant', True)` restricts the results to people who have actually used the bot.
-        response = supabase.table('economy').select("user_id, balance").eq('guild_id', ctx.guild.id).eq('participant', True).order('balance', desc=True).execute()
-        all_entries = response.data
+        all_entries = await get_multiple_user_economy_data(ctx.guild.id)
+        all_entries.sort(key=lambda x: x['balance'], reverse=True)
 
         if not all_entries:
             await send_embed(ctx, "No one has participated in the economy yet.")
@@ -456,7 +454,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         await send_embed(ctx, f"Verification failed, please try again.")
 
     # TODO: Random Messages for Steal + Work
-    # TODO: Link to Tiktok to gain arrows from lives
+    # Beg Command: send a request a person can respond to (by button) that'll auto give the money 
 
 async def setup(bot: commands.Bot) -> None:
     """

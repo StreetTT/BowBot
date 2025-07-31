@@ -1,0 +1,44 @@
+{
+	"files": [
+		{
+			"path": "utils/supabase_client.py",
+			"bookmarks": [
+				{
+					"line": 7,
+					"column": 0,
+					"label": ""
+				},
+				{
+					"line": 78,
+					"column": 0,
+					"label": ""
+				},
+				{
+					"line": 83,
+					"column": 0,
+					"label": ""
+				},
+				{
+					"line": 117,
+					"column": 0,
+					"label": ""
+				},
+				{
+					"line": 168,
+					"column": 0,
+					"label": ""
+				},
+				{
+					"line": 235,
+					"column": 0,
+					"label": ""
+				},
+				{
+					"line": 372,
+					"column": 0,
+					"label": ""
+				}
+			]
+		}
+	]
+}
