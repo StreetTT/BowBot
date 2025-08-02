@@ -5,6 +5,7 @@ from typing import Optional, List, Union, Any
 import random
 from core.tiktok import TikTokService
 from config import get_logger
+from rapidfuzz import fuzz
 
 log = get_logger()
 
@@ -163,23 +164,42 @@ async def send_embed(ctx: commands.Context, description: str, title: Optional[st
 
 async def get_user_from_arg(user_arg: Optional[Union[str, discord.Member]], ctx: commands.Context, random_if_invalid: bool = False):
     assert ctx.guild is not None
-    
-    if user_arg is not None and isinstance(user_arg, str):
-        try:
-            user_arg = await commands.MemberConverter().convert(ctx, user_arg)
-        except commands.MemberNotFound:
-            user_arg = None
 
-    # If no target member is specified, select a random non-bot member from the guild.
-    if user_arg is None:
-        if not random_if_invalid:
-            raise Exception("Member not found.")
-        # Filter out bots and the command author themselves.
-        members: List[discord.Member] = [m for m in ctx.guild.members if not m.bot and m.id != ctx.author.id]
-        if not members:
-            raise Exception("No non-bot members in the guild.")
-        return random.choice(members) # Pick a random member.
-    return user_arg
+    if isinstance(user_arg, discord.Member):
+        return user_arg
+
+    members = [m for m in list(ctx.guild.members) if not m.bot]
+    if not members:
+        raise Exception("How tf...")
+
+    if isinstance(user_arg, str):
+        matches = []
+        for member in members:
+            # Filter out any None names
+            names_to_check = [name for name in [member.nick, member.global_name, member.name] if name]
+
+            if not names_to_check:
+                continue
+
+            # Calculate a score for each name and take the maximum score..
+            scores = [fuzz.WRatio(user_arg.lower(), name.lower()) for name in names_to_check]
+            if (max_score := max(scores)):
+                matches.append((max_score, member))
+
+        # Sort members by score in descending order
+        sorted_members = [member for score, member in sorted(matches, key=lambda x: x[0], reverse=True)]
+
+        if len(sorted_members) >= 1: # If theres one or more matches, return the most likely one
+            return sorted_members[0]
+         
+    if not random_if_invalid:
+        raise Exception("Member not found.")
+    
+    # Filter select a random member, excluding the command's author.
+    members: List[discord.Member] = [m for m in ctx.guild.members if not m.bot and m.id != ctx.author.id]
+    if not members:
+        raise Exception("No non-bot members in the guild.")
+    return random.choice(members) # Pick a random member.
 
 
 def guild_only():
